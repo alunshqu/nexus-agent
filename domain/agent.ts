@@ -11,6 +11,7 @@ import type { Provider, TokenUsage } from "../infra/provider.js";
 import { startTrace, finalizeTrace, addErrorEvent, type Trace } from "../infra/trace.js";
 import { createLogger, serializeError, truncateValue } from "../infra/logger.js";
 import { memoryTools, executeMemoryTool, retrieveForSystem, retrieveForMessages, extractMemories } from "../memory/index.js";
+import { buildSkillPromptSection } from "../skills/index.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -105,12 +106,17 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
 
     // contextMemory is per-message (changes every request) — append to the last user message content
     // This only changes the LAST item in the input array, preserving the prefix for caching
-    if (contextMemory && loopMessages.length > 0) {
+    const skillSection = userMessage ? buildSkillPromptSection(userMessage) : "";
+    const injectedContext = [
+      contextMemory ? `[相关记忆]\n${contextMemory}` : "",
+      skillSection,
+    ].filter(Boolean).join("\n\n");
+    if (injectedContext && loopMessages.length > 0) {
       const lastMsg = loopMessages[loopMessages.length - 1];
       if (lastMsg.role === "user" && typeof lastMsg.content === "string") {
         loopMessages[loopMessages.length - 1] = {
           ...lastMsg,
-          content: `${lastMsg.content}\n\n[相关记忆]\n${contextMemory}`,
+          content: `${lastMsg.content}\n\n${injectedContext}`,
         };
       }
     }

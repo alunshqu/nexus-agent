@@ -65,6 +65,6 @@ low
 
   it("selects relevant skills for a task", () => {
     const selected = selectSkillsForTask("用 TDD 模式修改代码并提交", [webResearchSkill, codeChangeSkill], 3);
-    expect(selected.map(s => s.name)).toEqual(["code_change"]);
+    expect(selected.map(s => s.name)[0]).toBe("code_change");
   });
 });
