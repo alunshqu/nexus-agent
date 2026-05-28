@@ -12,7 +12,7 @@ import { startTrace, finalizeTrace, addErrorEvent, type Trace } from "../infra/t
 import { createLogger, serializeError, truncateValue } from "../infra/logger.js";
 import { memoryTools, executeMemoryTool, retrieveForSystem, retrieveForMessages, extractMemories } from "../memory/index.js";
 import { shouldColdStartCompress, coldStartCompressMessages } from "./cold-start.js";
-import { stableTools } from "../tools/tool-assembly.js";
+import { stableTools, buildActiveTools } from "../tools/tool-assembly.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -59,11 +59,14 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
     inc("agent.runs");
     phase = "load_tools";
     const allToolsRaw = stableTools([...tools, ...browserTools, ...memoryTools, ...getMcpTools()]);
-    allTools = opts.allowedTools
-      ? allToolsRaw.filter(t => opts.allowedTools!.some(pattern =>
+    const deferredLoading = process.env.TOOL_DEFER_LOADING === "1";
+    const loadedDeferredTools = new Set<string>();
+    const applyAllowedTools = (candidateTools: typeof allToolsRaw) => opts.allowedTools
+      ? candidateTools.filter(t => opts.allowedTools!.some(pattern =>
           pattern.endsWith("*") ? t.name.startsWith(pattern.slice(0, -1)) : t.name === pattern
         ))
-      : allToolsRaw;
+      : candidateTools;
+    allTools = applyAllowedTools(buildActiveTools(allToolsRaw, { deferredLoading, loadedTools: [] }));
 
     phase = "repair_messages";
     repairSessionMessages(state);
@@ -232,17 +235,28 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
         const t0 = Date.now();
         let result: { content: string; is_error?: boolean };
         try {
-          result = await withToolTimeout(
-            mcpToolMap.has(toolUse.name)
-              ? callMcpTool(toolUse.name, toolUse.input as Record<string, unknown>)
-              : toolUse.name.startsWith("browser_")
-              ? executeBrowserTool(state, toolUse.name, toolUse.input)
-              : toolUse.name.startsWith("memory_")
-              ? Promise.resolve(executeMemoryTool(toolUse.name, toolUse.input as Record<string, any>))
-              : executeTool(state, toolUse.name, toolUse.input),
-            toolUse.name,
-            state.id
-          );
+          if (toolUse.name === "tool_search") {
+            const query = typeof (toolUse.input as any)?.query === "string" ? (toolUse.input as any).query : "";
+            const maxResults = Number((toolUse.input as any)?.max_results ?? 20);
+            const { buildToolSearchIndex, buildToolLoadRequest } = await import("../tools/tool-search.js");
+            const index = buildToolSearchIndex(allToolsRaw.map(t => t.name), allTools.map(t => t.name));
+            const found = index.search(query, maxResults);
+            for (const name of found) loadedDeferredTools.add(name);
+            allTools = applyAllowedTools(buildActiveTools(allToolsRaw, { deferredLoading, loadedTools: [...loadedDeferredTools] }));
+            result = { content: JSON.stringify(buildToolLoadRequest(query, found, maxResults), null, 2) };
+          } else {
+            result = await withToolTimeout(
+              mcpToolMap.has(toolUse.name)
+                ? callMcpTool(toolUse.name, toolUse.input as Record<string, unknown>)
+                : toolUse.name.startsWith("browser_")
+                ? executeBrowserTool(state, toolUse.name, toolUse.input)
+                : toolUse.name.startsWith("memory_")
+                ? Promise.resolve(executeMemoryTool(toolUse.name, toolUse.input as Record<string, any>))
+                : executeTool(state, toolUse.name, toolUse.input),
+              toolUse.name,
+              state.id
+            );
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           logger.error("tool_dispatch_exception", error, { sessionId: state.id, toolName: toolUse.name, toolUseId: toolUse.id });

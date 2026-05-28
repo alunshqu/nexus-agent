@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { AgentTemplate } from "../agents/index.js";
+import { selectCoreTools, toolSearchToolSchema } from "./tool-search.js";
 
 export function stableTools<T extends Anthropic.Tool>(tools: T[]): T[] {
   return tools
@@ -15,6 +16,17 @@ export function buildAgentRegistryAttachment(templates: AgentTemplate[]): string
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(t => `- ${t.name}：${t.description}${t.tools?.length ? `；工具：${t.tools.join(", ")}` : ""}${t.maxIterations ? `；最大迭代：${t.maxIterations}` : ""}`);
   return `<agent_registry>\n可用子 agent：\n${lines.join("\n")}\n</agent_registry>`;
+}
+
+export function buildActiveTools<T extends Anthropic.Tool>(
+  allTools: T[],
+  opts: { deferredLoading?: boolean; loadedTools?: string[] } = {}
+): Anthropic.Tool[] {
+  if (!opts.deferredLoading) return stableTools(allTools);
+  const allNames = allTools.map(t => t.name);
+  const activeNames = new Set([...selectCoreTools(allNames), ...(opts.loadedTools ?? [])]);
+  const active = allTools.filter(t => activeNames.has(t.name));
+  return stableTools([...active, toolSearchToolSchema as T]);
 }
 
 function staticAgentToolDescription(name: string): string {
