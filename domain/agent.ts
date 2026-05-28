@@ -125,7 +125,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       });
 
       phase = "trace_llm_call";
-      trace.events.push({ type: "llm_call", iteration, model: provider.model, systemPrompt, messages: summarizeMessages(loopMessages), ts: Date.now() });
+      trace.events.push({ type: "llm_call", iteration, model: provider.model, systemPrompt, messages: loopMessages, ts: Date.now() });
 
       phase = "provider_stream";
       updateSessionStatus(state.id, { running: true, currentPhase: "thinking", currentTool: undefined, startedAt: trace.startTs });
