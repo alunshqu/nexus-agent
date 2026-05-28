@@ -13,6 +13,7 @@ import { createLogger, serializeError, truncateValue } from "../infra/logger.js"
 import { memoryTools, executeMemoryTool, retrieveForSystem, retrieveForMessages, extractMemories } from "../memory/index.js";
 import { shouldColdStartCompress, coldStartCompressMessages } from "./cold-start.js";
 import { stableTools, buildActiveTools } from "../tools/tool-assembly.js";
+import { toolCallSignature } from "../tools/tool-dedupe.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -220,7 +221,27 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       }
 
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      const seenToolCalls = new Map<string, Anthropic.ToolUseBlock>();
       for (const toolUse of toolUses) {
+        const signature = toolCallSignature(toolUse.name, toolUse.input);
+        const duplicateOf = seenToolCalls.get(signature);
+        if (duplicateOf) {
+          phase = "tool_duplicate";
+          const message = `Duplicate tool call suppressed at source: ${toolUse.name} has the same input as ${duplicateOf.id}.`;
+          logger.warn("duplicate_tool_call_suppressed", {
+            sessionId: state.id,
+            traceId: trace.id,
+            toolName: toolUse.name,
+            toolUseId: toolUse.id,
+            duplicateOf: duplicateOf.id,
+            input: truncateValue(toolUse.input, 1000),
+          });
+          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: message, is_error: true });
+          trace.events.push({ type: "tool_result", name: toolUse.name, result: message, is_error: true, durationMs: 0, ts: Date.now() });
+          continue;
+        }
+        seenToolCalls.set(signature, toolUse);
+
         phase = "tool_start";
         currentToolName = toolUse.name;
         if (!state.running) {
