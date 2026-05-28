@@ -14,6 +14,7 @@ import { memoryTools, executeMemoryTool, retrieveForSystem, retrieveForMessages,
 import { shouldColdStartCompress, coldStartCompressMessages } from "./cold-start.js";
 import { stableTools, buildActiveTools } from "../tools/tool-assembly.js";
 import { toolCallSignature } from "../tools/tool-dedupe.js";
+import { selectPrinciplesForTask, renderActivePrinciplesForPrompt, createEmptyPrincipleEvidence, recordToolEvidence, recordToolResultEvidence, evaluatePrinciples, maybeIngestUserCorrection, type ActivePrinciple, type PrincipleEvidence } from "../principles/index.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -54,6 +55,8 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
   let iteration = -1;
   let currentToolName: string | undefined;
   let userMessage = "";
+  let activePrinciples: ActivePrinciple[] = [];
+  let principleEvidence: PrincipleEvidence | undefined;
   const totalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
 
   try {
@@ -76,8 +79,19 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       ? state.messages.at(-1)!.content as string
       : "";
 
+    phase = "select_principles";
+    activePrinciples = selectPrinciplesForTask(userMessage);
+    principleEvidence = createEmptyPrincipleEvidence(userMessage);
+
     phase = "start_trace";
     trace = startTrace(state.id, userMessage, provider.model);
+    trace.events.push({
+      type: "principles_activated",
+      principles: activePrinciples.map(p => ({ id: p.id, title: p.title, level: p.level, score: p.score, matchedTriggers: p.matchedTriggers })),
+      ts: Date.now(),
+    });
+    const feedback = maybeIngestUserCorrection(userMessage, state.id);
+    if (feedback.saved) trace.events.push({ type: "feedback_ingested", pendingPath: feedback.pendingPath, ts: Date.now() });
 
     phase = "prepare_messages";
     fireHook("before_message", { SESSION_ID: state.id, MESSAGE: userMessage });
@@ -112,6 +126,9 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
     const memorySuffix = coreMemory
       ? `\n<user_memory>\n${coreMemory}\n</user_memory>\n<context>\n${dynamicContext}\n</context>`
       : `\n<context>\n${dynamicContext}\n</context>`;
+
+    const principleSuffix = renderActivePrinciplesForPrompt(activePrinciples);
+    const runSuffix = [memorySuffix, principleSuffix].filter(Boolean).join("\n\n");
 
     phase = "retrieve_context_memory";
     let contextMemory = "";
@@ -152,7 +169,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       const streamStart = Date.now();
       const { stopReason, content, usage, abort } = await provider.stream({
         systemPrompt,
-        systemSuffix: memorySuffix || undefined,
+        systemSuffix: runSuffix || undefined,
         messages: loopMessages,
         tools: allTools,
         onText: (delta) => onEvent({ type: "text", delta }),
@@ -191,9 +208,12 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
         updateSessionStatus(state.id, { running: false, currentTool: undefined, currentPhase: undefined, messageCount: state.messages.length });
         trace.endTs = Date.now();
         trace.events.push({ type: "done", totalMs: trace.endTs - trace.startTs, totalUsage, ts: Date.now() });
+        const assistantText = content.filter((b) => b.type === "text").map((b: any) => b.text).join("");
+        principleEvidence.finalResponse = assistantText;
+        const principleEvaluations = evaluatePrinciples(activePrinciples, principleEvidence);
+        trace.events.push({ type: "principle_eval", evaluations: principleEvaluations, ts: Date.now() });
         safeFinalizeTrace(trace, { sessionId: state.id, phase, iteration });
         onEvent({ type: "done", traceId: trace.id, usage: totalUsage });
-        const assistantText = content.filter((b) => b.type === "text").map((b: any) => b.text).join("");
         fireHook("on_done", {
           SESSION_ID: state.id,
           RESPONSE_TEXT: assistantText,
@@ -237,6 +257,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
             input: truncateValue(toolUse.input, 1000),
           });
           toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: message, is_error: true });
+          recordToolResultEvidence(principleEvidence, toolUse.name, message, true);
           trace.events.push({ type: "tool_result", name: toolUse.name, result: message, is_error: true, durationMs: 0, ts: Date.now() });
           continue;
         }
@@ -249,6 +270,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
           continue;
         }
         onEvent({ type: "tool_use", name: toolUse.name, input: toolUse.input });
+        recordToolEvidence(principleEvidence, toolUse.name, toolUse.input);
         trace.events.push({ type: "tool_call", name: toolUse.name, input: toolUse.input, ts: Date.now() });
 
         phase = "tool_dispatch";
@@ -292,6 +314,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
         phase = "tool_result";
         const truncated = result.content.length > 4000 ? result.content.slice(0, 4000) + "\n...[truncated]" : result.content;
         onEvent({ type: "tool_result", name: toolUse.name, result: truncated, is_error: result.is_error ?? false });
+        recordToolResultEvidence(principleEvidence, toolUse.name, truncated, result.is_error ?? false);
         trace.events.push({ type: "tool_result", name: toolUse.name, result: truncated, is_error: result.is_error ?? false, durationMs, ts: Date.now() });
         fireHook("after_tool", {
           SESSION_ID: state.id,
@@ -317,6 +340,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
     if (!state.running) {
       state.lastActivityAt = Date.now();
       trace.events.push({ type: "done", totalMs: trace.endTs - trace.startTs, totalUsage, ts: Date.now() });
+      if (principleEvidence) trace.events.push({ type: "principle_eval", evaluations: evaluatePrinciples(activePrinciples, principleEvidence), ts: Date.now() });
       safeFinalizeTrace(trace, { sessionId: state.id, phase, iteration });
       onEvent({ type: "done", traceId: trace.id, usage: totalUsage });
     } else {

@@ -8,6 +8,9 @@ export type TraceEvent =
   | { type: "llm_response"; iteration: number; stopReason: string; content: any[]; usage?: any; ts: number }
   | { type: "tool_call"; name: string; input: unknown; ts: number }
   | { type: "tool_result"; name: string; result: string; is_error: boolean; durationMs: number; ts: number }
+  | { type: "principles_activated"; principles: Array<{ id: string; title: string; level: string; score: number; matchedTriggers: string[] }>; ts: number }
+  | { type: "principle_eval"; evaluations: Array<{ principleId: string; passed: boolean; score: number; evidence: Record<string, unknown>; missing: string[] }>; ts: number }
+  | { type: "feedback_ingested"; pendingPath?: string; ts: number }
   | { type: "done"; totalMs: number; totalUsage: any; ts: number }
   | { type: "error"; message: string; phase?: string; details?: unknown; stack?: string; ts: number };
 
