@@ -8,6 +8,7 @@ import { runAgent, interruptAgent } from "../domain/agent.js";
 import type { AgentOptions, SessionState } from "../domain/types.js";
 import { createSession, loadSession, saveSession, saveMessage, prepareForNewUserMessage, registerSession, updateSessionStatus, setInMemorySession, getInMemorySession } from "../infra/session.js";
 import { createLogger } from "../infra/logger.js";
+import { formatTokenUsage } from "../infra/usage.js";
 
 const logger = createLogger("wecom");
 const MEDIA_DIR = path.join(os.homedir(), ".agent", "media");
@@ -181,6 +182,7 @@ async function handleMessage(frame: WsFrame, text: string, opts: Omit<AgentOptio
     });
 
     let fullContent = "";
+    let finalUsage: import("../infra/provider.js").TokenUsage | undefined;
     let lastTextAt = Date.now();
     let statusContent = "⏳ 思考中...";
     let resultStarted = false;
@@ -228,6 +230,8 @@ async function handleMessage(frame: WsFrame, text: string, opts: Omit<AgentOptio
               logger.error("reply_stream_failed", error, { sessionId: state.id, chatId, streamId, final: false });
             });
           }
+        } else if (event.type === "done") {
+          finalUsage = event.usage;
         }
       },
     });
@@ -238,9 +242,15 @@ async function handleMessage(frame: WsFrame, text: string, opts: Omit<AgentOptio
       wsClient!.replyStream(frame, statusStreamId, statusContent, true).catch(() => {});
     }
 
-    wsClient.replyStream(frame, streamId, fullContent || "完成。", true).catch((error) => {
+    const finalText = fullContent || "完成。";
+    wsClient.replyStream(frame, streamId, finalText, true).catch((error) => {
       logger.error("reply_stream_failed", error, { sessionId: state.id, chatId, streamId, final: true });
     });
+    if (finalUsage) {
+      wsClient.sendMessage(chatId, { msgtype: "markdown", markdown: { content: formatTokenUsage(finalUsage) } }).catch((error) => {
+        logger.error("usage_message_send_failed", error, { sessionId: state.id, chatId });
+      });
+    }
   } catch (error) {
     clearInterval(heartbeatTimer);
     logger.error("run_agent_exception", error, { sessionId: state.id, chatId, entrypoint: "wecom" });

@@ -13,6 +13,7 @@ import { handlePageRequest } from "./routes/pages.js";
 import { createLogger } from "./infra/logger.js";
 import { loadHooks } from "./infra/hooks.js";
 import { startScheduler } from "./infra/cron.js";
+import { formatTokenUsage } from "./infra/usage.js";
 import type { CronJob } from "./infra/cron.js";
 
 const logger = createLogger("server");
@@ -105,6 +106,7 @@ async function runCronJob(job: CronJob): Promise<void> {
   const state = createSession();
   state.messages.push({ role: "user", content: job.task });
   const parts: string[] = [];
+  let finalUsage: import("./infra/provider.js").TokenUsage | undefined;
 
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error(`Cron job timeout after ${CRON_JOB_TIMEOUT_MS}ms`)), CRON_JOB_TIMEOUT_MS)
@@ -113,7 +115,10 @@ async function runCronJob(job: CronJob): Promise<void> {
   await Promise.race([
     runAgent(state, {
       ...agentOpts,
-      onEvent: (e) => { if (e.type === "text") parts.push(e.delta); },
+      onEvent: (e) => {
+        if (e.type === "text") parts.push(e.delta);
+        else if (e.type === "done") finalUsage = e.usage;
+      },
     }),
     timeout,
   ]);
@@ -123,7 +128,8 @@ async function runCronJob(job: CronJob): Promise<void> {
 
   if (job.channel) {
     try {
-      await sendToWecomChannel(job.channel, `[定时任务：${job.name}]\n\n${result}`);
+      const usageNote = finalUsage ? `\n\n---\n${formatTokenUsage(finalUsage)}` : "";
+      await sendToWecomChannel(job.channel, `[定时任务：${job.name}]\n\n${result}${usageNote}`);
       logger.info("cron_channel_sent", { id: job.id, channel: job.channel });
     } catch (error) {
       logger.error("cron_channel_send_failed", error, { id: job.id, channel: job.channel });
