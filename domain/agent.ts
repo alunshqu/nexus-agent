@@ -12,6 +12,7 @@ import { startTrace, finalizeTrace, addErrorEvent, type Trace } from "../infra/t
 import { createLogger, serializeError, truncateValue } from "../infra/logger.js";
 import { memoryTools, executeMemoryTool, retrieveForSystem, retrieveForMessages, extractMemories } from "../memory/index.js";
 import { shouldColdStartCompress, coldStartCompressMessages } from "./cold-start.js";
+import { stableTools } from "../tools/tool-assembly.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -57,7 +58,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
   try {
     inc("agent.runs");
     phase = "load_tools";
-    const allToolsRaw = [...tools, ...browserTools, ...memoryTools, ...getMcpTools()];
+    const allToolsRaw = stableTools([...tools, ...browserTools, ...memoryTools, ...getMcpTools()]);
     allTools = opts.allowedTools
       ? allToolsRaw.filter(t => opts.allowedTools!.some(pattern =>
           pattern.endsWith("*") ? t.name.startsWith(pattern.slice(0, -1)) : t.name === pattern

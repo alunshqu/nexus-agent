@@ -43,7 +43,7 @@ function saveTemplates(templates: AgentTemplate[]) {
   writeFileSync(AGENTS_PATH, JSON.stringify(templates, null, 2), "utf8");
 }
 
-export let agentTemplates: AgentTemplate[] = loadTemplates();
+export let agentTemplates: AgentTemplate[] = loadTemplates().sort((a, b) => a.name.localeCompare(b.name));
 
 export function getAgentTemplate(name: string): AgentTemplate | undefined {
   return agentTemplates.find(t => t.name === name);
@@ -53,22 +53,22 @@ export function upsertAgentTemplate(template: AgentTemplate) {
   const idx = agentTemplates.findIndex(t => t.name === template.name);
   if (idx >= 0) agentTemplates[idx] = template;
   else agentTemplates.push(template);
+  agentTemplates.sort((a, b) => a.name.localeCompare(b.name));
   saveTemplates(agentTemplates);
   invalidateSystemPrompt();
 }
 
 export function deleteAgentTemplate(name: string) {
-  agentTemplates = agentTemplates.filter(t => t.name !== name);
+  agentTemplates = agentTemplates.filter(t => t.name !== name).sort((a, b) => a.name.localeCompare(b.name));
   saveTemplates(agentTemplates);
   invalidateSystemPrompt();
 }
 
 export function getAgentToolSchema(): Anthropic.Tool {
   const agentNames = agentTemplates.map(t => t.name);
-  const agentList = agentTemplates.map(t => `- ${t.name}: ${t.description}`).join("\n");
   return {
     name: "agent_run",
-    description: `委托专用子 agent 执行子任务。可用的 agent：\n${agentList}`,
+    description: `委托专用子 agent 执行子任务。具体可用 agent 见 system/context 中的 <agent_registry>。`,
     input_schema: {
       type: "object",
       properties: {
@@ -83,10 +83,9 @@ export function getAgentToolSchema(): Anthropic.Tool {
 
 export function getAgentsParallelToolSchema(): Anthropic.Tool {
   const agentNames = agentTemplates.map(t => t.name);
-  const agentList = agentTemplates.map(t => `- ${t.name}: ${t.description}`).join("\n");
   return {
     name: "agents_run_parallel",
-    description: `并行委托多个子 agent 同时执行独立子任务，所有任务完成后汇总结果。适合可以独立执行、互不依赖的子任务。可用的 agent：\n${agentList}`,
+    description: `并行委托多个子 agent 同时执行独立子任务。适合可以独立执行、互不依赖的子任务。具体可用 agent 见 system/context 中的 <agent_registry>。`,
     input_schema: {
       type: "object",
       properties: {

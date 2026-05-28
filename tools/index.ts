@@ -7,11 +7,12 @@ import { filesystemTools, toolReadFile, toolWriteFile, toolEditFile, toolListDir
 import { webTools, toolWebFetch, toolWebSearch } from "./web.js";
 import { getAgentToolSchema, getAgentsParallelToolSchema, getAgentManageToolSchemas, executeAgentTool, executeAgentsParallelTool, executeAgentManageTool } from "./agent.js";
 import { systemTools, executeSystemTool } from "./system.js";
+import { stableTools } from "./tool-assembly.js";
 import { createLogger } from "../infra/logger.js";
 
 const logger = createLogger("tool_dispatch");
 
-export const tools: Anthropic.Tool[] = [bashTool, setCwdTool, ...filesystemTools, ...webTools, getAgentToolSchema(), getAgentsParallelToolSchema(), ...getAgentManageToolSchemas(), ...systemTools];
+export const tools: Anthropic.Tool[] = stableTools([bashTool, setCwdTool, ...filesystemTools, ...webTools, getAgentToolSchema(), getAgentsParallelToolSchema(), ...getAgentManageToolSchemas(), ...systemTools]);
 
 export async function executeTool(
   state: SessionState,
