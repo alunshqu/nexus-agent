@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 配置</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 32px; width: 560px; }
+  h1 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+  .field { margin-bottom: 16px; }
+  label { display: block; font-size: 12px; color: #888; margin-bottom: 6px; }
+  input, select { width: 100%; background: #111; border: 1px solid #333; border-radius: 8px; padding: 10px 12px; color: #e0e0e0; font-size: 14px; outline: none; }
+  input:focus, select:focus { border-color: #1a6cf5; }
+  select option { background: #1a1a1a; }
+  .row { display: flex; gap: 12px; }
+  .row .field { flex: 1; }
+  .actions { display: flex; gap: 10px; margin-top: 24px; align-items: center; flex-wrap: wrap; }
+  button { background: #1a6cf5; border: none; border-radius: 8px; padding: 10px 16px; color: #fff; cursor: pointer; font-size: 14px; }
+  button.secondary { background: #222; color: #aaa; }
+  button.small { background:#222; border:1px solid #333; border-radius:6px; padding:6px 10px; color:#aaa; font-size:12px; }
+  button:hover { opacity: 0.85; }
+  .status { font-size: 13px; color: #4caf50; }
+  .status.error { color: #f44336; }
+  .hint { font-size: 11px; color: #666; margin-top: 4px; line-height: 1.4; }
+  .current-model { font-size: 12px; color: #888; background: #111; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; margin-bottom: 16px; }
+  .provider-actions { display:flex; gap:8px; margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Provider 配置</h1>
+  <div class="current-model" id="current-model">加载中...</div>
+
+  <div class="field">
+    <label>Provider</label>
+    <select id="provider-select"></select>
+    <div class="provider-actions">
+      <button type="button" class="small" id="new-provider-btn">新增 Provider</button>
+      <button type="button" class="small" id="save-provider-btn">保存 Provider</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label>名称</label>
+      <input type="text" id="provider-name" placeholder="OpenAI / DeepSeek / 内网代理">
+    </div>
+    <div class="field">
+      <label>类型</label>
+      <select id="type">
+        <option value="anthropic">Anthropic</option>
+        <option value="openai">OpenAI 兼容</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>API Key</label>
+    <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off">
+  </div>
+
+  <div class="field">
+    <label>Base URL <span style="color:#555">（可选，留空使用默认）</span></label>
+    <input type="text" id="baseURL" placeholder="https://api.openai.com/v1">
+    <div class="hint" id="base-url-hint"></div>
+  </div>
+
+  <div class="field">
+    <label>模型 <button type="button" id="fetch-models-btn" class="small" style="margin-left:6px">获取并缓存模型列表</button></label>
+    <input type="text" id="model" placeholder="留空使用默认模型" list="model-list">
+    <datalist id="model-list"></datalist>
+    <select id="model-select" style="margin-top:8px"></select>
+    <div class="hint" id="model-hint"></div>
+  </div>
+
+  <div class="actions">
+    <button id="save-btn">设为当前并热重载</button>
+    <button class="secondary" id="reset-btn">重置</button>
+    <span class="status" id="status"></span>
+  </div>
+</div>
+
+<script>
+const hints = {
+  anthropic: { baseURL: "默认：https://api.anthropic.com", model: "默认：claude-opus-4-7" },
+  openai: { baseURL: "OpenAI: https://api.openai.com/v1  DeepSeek: https://api.deepseek.com/v1  Ollama: http://localhost:11434/v1", model: "可从缓存下拉选择，也可手输模型名" },
+};
+let cfg = null;
+let editingProviderId = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+
+async function load() {
+  cfg = await (await fetch("/api/config")).json();
+  cfg.providers ||= [];
+  editingProviderId = cfg.activeProviderId || cfg.providers[0]?.id;
+  renderProviders();
+  fillForm(getProvider(editingProviderId), cfg.model);
+  updateStatus();
+}
+
+function updateStatus() {
+  $("current-model").textContent = `当前：${cfg.type} / ${cfg.model} / provider=${getProvider(cfg.activeProviderId)?.name ?? cfg.activeProviderId}`;
+}
+
+function getProvider(id) { return cfg.providers.find(p => p.id === id) || cfg.providers[0]; }
+
+function renderProviders() {
+  $("provider-select").innerHTML = cfg.providers.map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.type)}${p.models?.length ? ` · ${p.models.length} models` : ""}</option>`).join("");
+  if (editingProviderId) $("provider-select").value = editingProviderId;
+}
+
+function fillForm(p, model) {
+  if (!p) return;
+  editingProviderId = p.id;
+  $("provider-select").value = p.id;
+  $("provider-name").value = p.name ?? "";
+  $("type").value = p.type ?? "anthropic";
+  $("apiKey").value = p.apiKey ?? "";
+  $("baseURL").value = p.baseURL ?? "";
+  $("model").value = model ?? "";
+  updateHints(p.type);
+  renderModels(p);
+}
+
+function readProviderForm() {
+  return {
+    id: editingProviderId && !String(editingProviderId).startsWith("new-") ? editingProviderId : undefined,
+    name: $("provider-name").value.trim() || undefined,
+    type: $("type").value,
+    apiKey: $("apiKey").value.trim() || undefined,
+    baseURL: $("baseURL").value.trim() || undefined,
+  };
+}
+
+function updateHints(type) {
+  const h = hints[type] ?? hints.openai;
+  $("base-url-hint").textContent = h.baseURL;
+  $("model-hint").textContent = h.model;
+}
+
+function renderModels(p) {
+  const models = p?.models ?? [];
+  $("model-list").innerHTML = models.map(m => `<option value="${esc(m)}">`).join("");
+  $("model-select").innerHTML = `<option value="">从已缓存模型列表选择（${models.length}）</option>` + models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+  if (models.includes($("model").value)) $("model-select").value = $("model").value;
+  const fetched = p?.modelsFetchedAt ? `，缓存时间：${new Date(p.modelsFetchedAt).toLocaleString()}` : "";
+  $("model-hint").textContent = `${(hints[p?.type] ?? hints.openai).model}${fetched}`;
+}
+
+$("provider-select").addEventListener("change", e => {
+  const p = getProvider(e.target.value);
+  const model = cfg.activeProviderId === p.id ? (cfg.model ?? "") : "";
+  fillForm(p, model);
+});
+$("type").addEventListener("change", e => updateHints(e.target.value));
+$("model-select").addEventListener("change", e => { if (e.target.value) $("model").value = e.target.value; });
+
+$("new-provider-btn").addEventListener("click", () => {
+  editingProviderId = `new-${Date.now()}`;
+  $("provider-name").value = "";
+  $("type").value = "openai";
+  $("apiKey").value = "";
+  $("baseURL").value = "";
+  $("model").value = "";
+  renderModels({ models: [], type: "openai" });
+  updateHints("openai");
+});
+
+$("save-provider-btn").addEventListener("click", async () => {
+  const status = $("status");
+  try {
+    const body = readProviderForm();
+    const res = await fetch("/api/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "保存 Provider 失败");
+    cfg = data.config;
+    editingProviderId = data.provider.id;
+    renderProviders();
+    status.className = "status";
+    status.textContent = `✓ Provider 已保存：${data.provider.name}`;
+  } catch (e) { status.className = "status error"; status.textContent = String(e.message || e); }
+});
+
+$("fetch-models-btn").addEventListener("click", async () => {
+  const btn = $("fetch-models-btn");
+  const currentModel = $("model").value;
+  btn.textContent = "加载中...";
+  try {
+    const body = readProviderForm();
+    const res1 = await fetch("/api/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d1 = await res1.json();
+    if (!d1.ok) throw new Error(d1.error);
+    const res2 = await fetch("/api/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providerId: d1.provider.id }) });
+    const d2 = await res2.json();
+    const models = Array.isArray(d2) ? d2 : (d2.models ?? []);
+    cfg = await (await fetch("/api/config")).json();
+    editingProviderId = d1.provider.id;
+    renderProviders();
+    renderModels(getProvider(d1.provider.id));
+    $("model").value = currentModel;
+    btn.textContent = `${models.length} 个模型`;
+    $("status").className = "status";
+    $("status").textContent = `✓ 已缓存 ${models.length} 个模型`;
+  } catch (e) {
+    btn.textContent = "获取失败";
+    $("status").className = "status error";
+    $("status").textContent = String(e.message || e);
+  }
+});
+
+$("save-btn").addEventListener("click", async () => {
+  const status = $("status");
+  const model = $("model").value.trim() || undefined;
+  try {
+    const body = readProviderForm();
+    const res1 = await fetch("/api/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d1 = await res1.json();
+    if (!d1.ok) throw new Error(d1.error);
+    const config = { ...cfg, activeProviderId: d1.provider.id, type: d1.provider.type, apiKey: d1.provider.apiKey, baseURL: d1.provider.baseURL, model };
+    const res2 = await fetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) });
+    const d2 = await res2.json();
+    if (!d2.ok) throw new Error(d2.error || "保存失败");
+    cfg = await (await fetch("/api/config")).json();
+    $("model").value = cfg.model ?? "";
+    renderProviders();
+    updateStatus();
+    status.className = "status";
+    status.textContent = `✓ 已切换到 ${d2.model}`;
+  } catch (e) {
+    status.className = "status error";
+    status.textContent = String(e.message || e);
+  }
+});
+
+$("reset-btn").addEventListener("click", async () => {
+  const res = await fetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reset: true }) });
+  const data = await res.json();
+  if (data.ok) { await load(); $("status").textContent = "✓ 已重置"; }
+});
+
+load();
+</script>
+</body>
+</html>

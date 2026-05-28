@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skills</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; padding: 24px; }
+h1 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+h2 { font-size: 15px; font-weight: 600; margin: 20px 0 12px; color: #aaa; }
+.section { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+.skill-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #2a2a2a; border-radius: 8px; margin-bottom: 8px; }
+.skill-item .info { flex: 1; min-width: 0; }
+.skill-item .name { font-weight: 500; font-size: 14px; }
+.skill-item .desc { font-size: 12px; color: #888; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skill-item button { background: #222; border: 1px solid #333; border-radius: 6px; padding: 4px 10px; color: #aaa; font-size: 12px; cursor: pointer; }
+.skill-item button:hover { color: #f44336; border-color: #f44336; }
+input { width: 100%; background: #111; border: 1px solid #333; border-radius: 8px; padding: 10px 12px; color: #e0e0e0; font-size: 14px; outline: none; margin-bottom: 10px; }
+input:focus { border-color: #1a6cf5; }
+label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+button.primary { background: #1a6cf5; border: none; border-radius: 8px; padding: 10px 16px; color: #fff; cursor: pointer; font-size: 14px; }
+button.primary:hover { opacity: 0.85; }
+.tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid #2a2a2a; }
+.tab { padding: 8px 16px; font-size: 13px; color: #888; cursor: pointer; border-bottom: 2px solid transparent; }
+.tab.active { color: #e0e0e0; border-bottom-color: #1a6cf5; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.search-results { max-height: 400px; overflow-y: auto; }
+.result-card { padding: 12px; border: 1px solid #2a2a2a; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+.result-card:hover { border-color: #1a6cf5; }
+.result-card .title { font-weight: 500; font-size: 14px; }
+.result-card .desc { font-size: 12px; color: #888; margin-top: 4px; line-height: 1.4; }
+.result-card .badges { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.result-card .badge { font-size: 11px; background: #222; border: 1px solid #333; border-radius: 4px; padding: 2px 6px; color: #aaa; }
+.status { font-size: 13px; margin-top: 8px; }
+.status.ok { color: #4caf50; }
+.status.err { color: #f44336; }
+.empty { color: #555; font-size: 13px; padding: 20px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>Skills</h1>
+
+<div class="section">
+  <h2 style="margin-top:0">已安装</h2>
+  <div id="skill-list"><div class="empty">加载中...</div></div>
+</div>
+
+<div class="section">
+  <h2 style="margin-top:0">添加 Skill</h2>
+  <div class="tabs">
+    <div class="tab active" data-tab="search">Smithery 搜索</div>
+    <div class="tab" data-tab="github">GitHub 安装</div>
+  </div>
+
+  <div class="tab-content active" id="tab-search">
+    <input type="text" id="search-input" placeholder="搜索 Skill（如 code review, deploy, testing...）">
+    <div class="search-results" id="search-results"><div class="empty">输入关键词搜索 Smithery 上的 Skills</div></div>
+  </div>
+
+  <div class="tab-content" id="tab-github">
+    <label>GitHub 仓库（包含 SKILL.md 的目录）</label>
+    <input type="text" id="gh-url" placeholder="https://github.com/user/repo/tree/main/skills/my-skill">
+    <label>名称（可选）</label>
+    <input type="text" id="gh-name" placeholder="自动从路径生成">
+    <button class="primary" id="gh-add-btn">安装</button>
+    <div class="status" id="gh-status"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let searchTimer = null;
+
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    $("tab-" + tab.dataset.tab).classList.add("active");
+  });
+});
+
+async function loadSkills() {
+  const res = await fetch("/api/skills");
+  const skills = await res.json();
+  if (!skills.length) { $("skill-list").innerHTML = '<div class="empty">暂无已安装的 Skill</div>'; return; }
+  $("skill-list").innerHTML = skills.map(s => `
+    <div class="skill-item">
+      <div class="info">
+        <div class="name">${esc(s.displayName || s.name)}</div>
+        <div class="desc">${esc(s.description || '')}</div>
+      </div>
+      <button onclick="removeSkill('${esc(s.name)}')">删除</button>
+    </div>
+  `).join("");
+}
+
+async function removeSkill(name) {
+  if (!confirm(`删除 Skill: ${name}？`)) return;
+  await fetch("/api/skills/" + encodeURIComponent(name), { method: "DELETE" });
+  loadSkills();
+}
+
+// ── Smithery search ──
+$("search-input").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(doSearch, 400);
+});
+
+async function doSearch() {
+  const q = $("search-input").value.trim();
+  if (!q) { $("search-results").innerHTML = '<div class="empty">输入关键词搜索</div>'; return; }
+  $("search-results").innerHTML = '<div class="empty">搜索中...</div>';
+  const res = await fetch("/api/mcp/skills?q=" + encodeURIComponent(q));
+  const data = await res.json();
+  const skills = data.skills ?? [];
+  if (!skills.length) { $("search-results").innerHTML = '<div class="empty">未找到结果</div>'; return; }
+  $("search-results").innerHTML = skills.map(s => `
+    <div class="result-card" onclick="installSkill('${esc(s.qualifiedName)}')">
+      <div class="title">${esc(s.displayName || s.qualifiedName)}</div>
+      <div class="desc">${esc(s.description || '')}</div>
+      <div class="badges">
+        ${s.verified ? '<span class="badge">verified</span>' : ''}
+        ${(s.categories || []).map(c => `<span class="badge">${esc(c)}</span>`).join("")}
+        <span class="badge">${s.totalActivations ?? 0} uses</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function installSkill(qualifiedName) {
+  const res = await fetch("/api/mcp/skills?q=" + encodeURIComponent(qualifiedName));
+  const data = await res.json();
+  const skill = (data.skills ?? []).find(s => s.qualifiedName === qualifiedName);
+  if (!skill) { alert("无法获取 Skill 信息"); return; }
+  if (!skill.gitUrl) { alert("该 Skill 没有 gitUrl，无法安装"); return; }
+  const name = skill.slug || qualifiedName.replace(/\//g, "-");
+  if (!confirm(`安装 Skill: ${skill.displayName}\n\n${skill.description || ""}`)) return;
+  const r = await fetch("/api/skills", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, gitUrl: skill.gitUrl }) });
+  const d = await r.json();
+  if (d.ok) { loadSkills(); alert(`✓ "${name}" 已安装`); }
+  else alert("安装失败: " + (d.error || "unknown"));
+}
+
+// ── GitHub install ──
+$("gh-add-btn").addEventListener("click", async () => {
+  const gitUrl = $("gh-url").value.trim();
+  if (!gitUrl) { $("gh-status").className = "status err"; $("gh-status").textContent = "请填写地址"; return; }
+  const pathParts = gitUrl.replace(/.*github\.com\//, "").split("/");
+  const name = $("gh-name").value.trim() || pathParts[pathParts.length - 1] || "skill";
+  $("gh-status").className = "status"; $("gh-status").textContent = "安装中...";
+  const r = await fetch("/api/skills", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, gitUrl }) });
+  const d = await r.json();
+  if (d.ok) { $("gh-status").className = "status ok"; $("gh-status").textContent = "✓ 已安装"; loadSkills(); }
+  else { $("gh-status").className = "status err"; $("gh-status").textContent = d.error || "失败"; }
+});
+
+function esc(s) { return String(s ?? "").replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+
+loadSkills();
+</script>
+</body>
+</html>

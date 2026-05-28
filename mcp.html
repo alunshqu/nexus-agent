@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP 管理</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; padding: 24px; }
+h1 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+h2 { font-size: 15px; font-weight: 600; margin: 20px 0 12px; color: #aaa; }
+.section { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+.server-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #2a2a2a; border-radius: 8px; margin-bottom: 8px; }
+.server-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.server-item .dot.on { background: #4caf50; }
+.server-item .dot.off { background: #f44336; }
+.server-item .info { flex: 1; min-width: 0; }
+.server-item .name { font-weight: 500; font-size: 14px; }
+.server-item .meta { font-size: 12px; color: #666; margin-top: 2px; }
+.server-item button { background: #222; border: 1px solid #333; border-radius: 6px; padding: 4px 10px; color: #aaa; font-size: 12px; cursor: pointer; }
+.server-item button:hover { color: #f44336; border-color: #f44336; }
+.tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid #2a2a2a; }
+.tab { padding: 8px 16px; font-size: 13px; color: #888; cursor: pointer; border-bottom: 2px solid transparent; }
+.tab.active { color: #e0e0e0; border-bottom-color: #1a6cf5; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+input, select { width: 100%; background: #111; border: 1px solid #333; border-radius: 8px; padding: 10px 12px; color: #e0e0e0; font-size: 14px; outline: none; margin-bottom: 10px; }
+input:focus { border-color: #1a6cf5; }
+label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+button.primary { background: #1a6cf5; border: none; border-radius: 8px; padding: 10px 16px; color: #fff; cursor: pointer; font-size: 14px; }
+button.primary:hover { opacity: 0.85; }
+button.secondary { background: #222; border: 1px solid #333; border-radius: 8px; padding: 10px 16px; color: #aaa; cursor: pointer; font-size: 14px; }
+.search-results { max-height: 400px; overflow-y: auto; }
+.result-card { padding: 12px; border: 1px solid #2a2a2a; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+.result-card:hover { border-color: #1a6cf5; }
+.result-card .title { font-weight: 500; font-size: 14px; }
+.result-card .desc { font-size: 12px; color: #888; margin-top: 4px; line-height: 1.4; }
+.result-card .badges { display: flex; gap: 6px; margin-top: 6px; }
+.result-card .badge { font-size: 11px; background: #222; border: 1px solid #333; border-radius: 4px; padding: 2px 6px; color: #aaa; }
+.status { font-size: 13px; margin-top: 8px; }
+.status.ok { color: #4caf50; }
+.status.err { color: #f44336; }
+.empty { color: #555; font-size: 13px; padding: 20px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>MCP Servers</h1>
+
+<div class="section">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h2 style="margin:0">已连接</h2>
+    <button class="secondary" id="reconnect-btn" style="padding:6px 12px;font-size:12px">全部重连</button>
+  </div>
+  <div id="server-list"><div class="empty">加载中...</div></div>
+</div>
+
+<div class="section">
+  <h2 style="margin-top:0">添加 Server</h2>
+  <div class="tabs">
+    <div class="tab active" data-tab="smithery">Smithery 搜索</div>
+    <div class="tab" data-tab="manual">手动配置</div>
+    <div class="tab" data-tab="github">GitHub 安装</div>
+  </div>
+
+  <div class="tab-content active" id="tab-smithery">
+    <input type="text" id="search-input" placeholder="搜索 MCP server（如 github, slack, database...）">
+    <div class="search-results" id="search-results"><div class="empty">输入关键词搜索 Smithery 上的 MCP server</div></div>
+  </div>
+
+  <div class="tab-content" id="tab-manual">
+    <label>名称</label>
+    <input type="text" id="m-name" placeholder="my-server">
+    <label>类型</label>
+    <select id="m-type">
+      <option value="streamable-http">HTTP (streamable-http)</option>
+      <option value="stdio">本地进程 (stdio)</option>
+    </select>
+    <div id="m-http-fields">
+      <label>URL</label>
+      <input type="text" id="m-url" placeholder="https://example.com/mcp">
+    </div>
+    <div id="m-stdio-fields" style="display:none">
+      <label>Command</label>
+      <input type="text" id="m-command" placeholder="npx">
+      <label>Args（逗号分隔）</label>
+      <input type="text" id="m-args" placeholder="-y, @some/mcp-server">
+    </div>
+    <button class="primary" id="m-add-btn">添加并连接</button>
+    <div class="status" id="m-status"></div>
+  </div>
+
+  <div class="tab-content" id="tab-github">
+    <label>GitHub 仓库</label>
+    <input type="text" id="gh-url" placeholder="https://github.com/user/repo 或 user/repo">
+    <label>名称（可选）</label>
+    <input type="text" id="gh-name" placeholder="自动从仓库名生成">
+    <button class="primary" id="gh-add-btn">安装并连接</button>
+    <div class="status" id="gh-status"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let searchTimer = null;
+
+// ── Tabs ──
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    $("tab-" + tab.dataset.tab).classList.add("active");
+  });
+});
+
+$("m-type").addEventListener("change", () => {
+  const isHttp = $("m-type").value !== "stdio";
+  $("m-http-fields").style.display = isHttp ? "" : "none";
+  $("m-stdio-fields").style.display = isHttp ? "none" : "";
+});
+
+// ── Load servers ──
+async function loadServers() {
+  const res = await fetch("/api/mcp");
+  const servers = await res.json();
+  if (!servers.length) { $("server-list").innerHTML = '<div class="empty">暂无 MCP server</div>'; return; }
+  $("server-list").innerHTML = servers.map(s => `
+    <div class="server-item">
+      <div class="dot ${s.connected ? 'on' : 'off'}"></div>
+      <div class="info">
+        <div class="name">${esc(s.name)}</div>
+        <div class="meta">${s.connected ? s.toolCount + ' tools' : '未连接'} · ${s.config.type === 'stdio' ? 'stdio: ' + esc(s.config.command) : esc(s.config.url || '')}</div>
+      </div>
+      <button onclick="removeServer('${esc(s.name)}')">删除</button>
+    </div>
+  `).join("");
+}
+
+async function removeServer(name) {
+  if (!confirm(`删除 ${name}？`)) return;
+  await fetch("/api/mcp/" + encodeURIComponent(name), { method: "DELETE" });
+  loadServers();
+}
+
+$("reconnect-btn").addEventListener("click", async () => {
+  $("reconnect-btn").textContent = "重连中...";
+  await fetch("/api/mcp/reconnect", { method: "POST" });
+  $("reconnect-btn").textContent = "全部重连";
+  loadServers();
+});
+
+// ── Smithery search ──
+$("search-input").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(doSearch, 400);
+});
+
+async function doSearch() {
+  const q = $("search-input").value.trim();
+  if (!q) { $("search-results").innerHTML = '<div class="empty">输入关键词搜索</div>'; return; }
+  $("search-results").innerHTML = '<div class="empty">搜索中...</div>';
+  const res = await fetch("/api/mcp/search?q=" + encodeURIComponent(q));
+  const data = await res.json();
+  const servers = data.servers ?? [];
+  if (!servers.length) { $("search-results").innerHTML = '<div class="empty">未找到结果</div>'; return; }
+  $("search-results").innerHTML = servers.map(s => `
+    <div class="result-card" onclick="installSmithery('${esc(s.qualifiedName)}')">
+      <div class="title">${esc(s.displayName || s.qualifiedName)}</div>
+      <div class="desc">${esc(s.description || '')}</div>
+      <div class="badges">
+        ${s.verified ? '<span class="badge">✓ verified</span>' : ''}
+        ${s.remote ? '<span class="badge">remote</span>' : '<span class="badge">local</span>'}
+        <span class="badge">${s.useCount ?? 0} uses</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function installSmithery(qualifiedName) {
+  const res = await fetch("/api/mcp/details/" + encodeURIComponent(qualifiedName));
+  const detail = await res.json();
+  const conn = detail.connections?.[0];
+  if (!conn) { alert("无法获取连接信息"); return; }
+  const name = qualifiedName.replace(/\//g, "-");
+  let config;
+  if (conn.type === "http" && conn.deploymentUrl) {
+    config = { type: "streamable-http", url: conn.deploymentUrl };
+  } else if (conn.type === "stdio") {
+    config = { type: "stdio", command: conn.command, args: conn.args ?? [] };
+  } else {
+    config = { type: "streamable-http", url: conn.deploymentUrl || conn.url };
+  }
+  const r = await fetch("/api/mcp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, config }) });
+  const d = await r.json();
+  if (d.ok) { loadServers(); alert(`✓ ${name} 已添加`); }
+  else alert("添加失败: " + (d.error || "unknown"));
+}
+
+// ── Manual add ──
+$("m-add-btn").addEventListener("click", async () => {
+  const name = $("m-name").value.trim();
+  if (!name) { $("m-status").className = "status err"; $("m-status").textContent = "请填写名称"; return; }
+  let config;
+  if ($("m-type").value === "stdio") {
+    config = { type: "stdio", command: $("m-command").value.trim(), args: $("m-args").value.split(",").map(s => s.trim()).filter(Boolean) };
+  } else {
+    config = { type: "streamable-http", url: $("m-url").value.trim() };
+  }
+  $("m-status").className = "status"; $("m-status").textContent = "连接中...";
+  const res = await fetch("/api/mcp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, config }) });
+  const d = await res.json();
+  if (d.ok) { $("m-status").className = "status ok"; $("m-status").textContent = "✓ 已添加"; loadServers(); }
+  else { $("m-status").className = "status err"; $("m-status").textContent = d.error || "失败"; }
+});
+
+// ── GitHub install ──
+$("gh-add-btn").addEventListener("click", async () => {
+  let url = $("gh-url").value.trim();
+  if (!url) { $("gh-status").className = "status err"; $("gh-status").textContent = "请填写仓库地址"; return; }
+  const match = url.match(/(?:github\.com\/)?([^\/]+\/[^\/\s]+)/);
+  if (!match) { $("gh-status").className = "status err"; $("gh-status").textContent = "无法解析仓库地址"; return; }
+  const repo = match[1].replace(/\.git$/, "");
+  const name = $("gh-name").value.trim() || repo.split("/")[1];
+  const config = { type: "stdio", command: "npx", args: ["-y", `github:${repo}`] };
+  $("gh-status").className = "status"; $("gh-status").textContent = "安装中...";
+  const res = await fetch("/api/mcp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, config }) });
+  const d = await res.json();
+  if (d.ok) { $("gh-status").className = "status ok"; $("gh-status").textContent = "✓ 已安装"; loadServers(); }
+  else { $("gh-status").className = "status err"; $("gh-status").textContent = d.error || "失败"; }
+});
+
+function esc(s) { return String(s ?? "").replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+
+loadServers();
+</script>
+</body>
+</html>

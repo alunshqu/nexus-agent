@@ -1,0 +1,27 @@
+{
+  "name": "agent",
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.92.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@wecom/aibot-node-sdk": "^1.0.7",
+    "better-sqlite3": "^11.0.0",
+    "chrome-remote-interface": "^0.34.0",
+    "openai": "^6.39.0",
+    "sqlite-vec": "^0.1.9",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.7"
+  }
+}

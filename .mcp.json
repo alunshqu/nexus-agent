@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wecom-doc": {
+      "type": "streamable-http",
+      "url": "https://qyapi.weixin.qq.com/mcp/robot-doc?apikey=4qf_BXAPtkAvGtcnaIU06d_dSjbeujeyeulmEGZIU6xVrYjq_GT_Gk1NSZh0a11tQC9f_8mnIO3Obti0-UEWeA"
+    }
+  }
+}

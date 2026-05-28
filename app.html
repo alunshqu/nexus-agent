@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f0f0f; color: #e0e0e0; height: 100vh; display: flex; }
+
+  /* Sidebar nav */
+  .nav { width: 72px; flex-shrink: 0; background: #0a0a0a; border-right: 1px solid #1e1e1e; display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px; }
+  .nav a { width: 56px; padding: 8px 0; display: flex; flex-direction: column; align-items: center; gap: 2px; border-radius: 8px; color: #555; text-decoration: none; font-size: 16px; }
+  .nav a span { font-size: 10px; }
+  .nav a:hover { background: #1a1a1a; color: #e0e0e0; }
+  .nav a.active { background: #1a6cf5; color: #fff; }
+  .nav .spacer { flex: 1; }
+
+  /* Main content */
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  iframe { flex: 1; border: none; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="#chat" id="nav-chat" title="对话">💬<span>对话</span></a>
+  <a href="#trace" id="nav-trace" title="追踪">📊<span>追踪</span></a>
+  <a href="#mcp" id="nav-mcp" title="MCP">🔌<span>MCP</span></a>
+  <a href="#monitor" id="nav-monitor" title="监控">📡<span>监控</span></a>
+  <a href="#agents" id="nav-agents" title="Agents">🤖<span>Agents</span></a>
+  <a href="#skills" id="nav-skills" title="Skills">🧩<span>Skills</span></a>
+  <a href="#settings" id="nav-settings" title="配置">⚙<span>配置</span></a>
+  <div class="spacer"></div>
+</nav>
+<div class="content">
+  <iframe id="frame" src="/chat"></iframe>
+</div>
+
+<script>
+const frame = document.getElementById("frame");
+const pages = { chat: "/chat", trace: "/trace-page", mcp: "/mcp-page", monitor: "/monitor-page", agents: "/agents-page", skills: "/skills-page", settings: "/settings-page" };
+
+function navigate(page) {
+  frame.src = pages[page] || pages.chat;
+  document.querySelectorAll(".nav a").forEach(a => a.classList.remove("active"));
+  document.getElementById("nav-" + page)?.classList.add("active");
+  location.hash = page;
+}
+
+document.querySelectorAll(".nav a").forEach(a => {
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate(a.href.split("#")[1]);
+  });
+});
+
+// Handle hash on load
+const initPage = location.hash.slice(1) || "chat";
+navigate(initPage);
+
+// Listen for messages from iframes (e.g., trace link click)
+window.addEventListener("message", (e) => {
+  if (e.data?.type === "navigate") navigate(e.data.page);
+  if (e.data?.type === "openTrace") {
+    navigate("trace");
+    setTimeout(() => frame.contentWindow?.postMessage(e.data, "*"), 200);
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>执行详情</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f0f0f; color: #e0e0e0; }
+  .layout { display: flex; height: 100vh; }
+  .sidebar { width: 280px; flex-shrink: 0; border-right: 1px solid #1e1e1e; overflow-y: auto; padding: 16px; }
+  .main { flex: 1; overflow-y: auto; padding: 20px; }
+  .sidebar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .sidebar-header h2 { font-size: 13px; color: #888; font-weight: 500; }
+  a.back { color: #555; font-size: 12px; text-decoration: none; }
+  a.back:hover { color: #e0e0e0; }
+  .trace-item { padding: 10px 12px; border: 1px solid #1e1e1e; border-radius: 6px; margin-bottom: 6px; cursor: pointer; }
+  .trace-item:hover { background: #1a1a1a; }
+  .trace-item.active { border-color: #1a6cf5; background: #0d1f3c; }
+  .trace-item .msg { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trace-item .meta { font-size: 11px; color: #555; margin-top: 3px; }
+  .main-header { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #1e1e1e; }
+  .main-header h1 { font-size: 15px; font-weight: 600; }
+  .main-header .meta { font-size: 12px; color: #555; margin-top: 4px; }
+  .summary { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; background: #111; border-radius: 8px; }
+  .stat { font-size: 12px; color: #666; }
+  .stat span { color: #e0e0e0; font-weight: 600; }
+
+  /* Events */
+  .event { margin-bottom: 8px; border-radius: 8px; overflow: hidden; border: 1px solid #1e1e1e; }
+  .event-hdr { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; user-select: none; }
+  .event-hdr:hover { background: #161616; }
+  .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; flex-shrink: 0; }
+  .badge-llm_call { background: #0d2040; color: #5b9bd5; }
+  .badge-llm_response { background: #0d2040; color: #5b9bd5; }
+  .badge-tool_call { background: #2a1f00; color: #d4a017; }
+  .badge-tool_result { background: #0d2010; color: #5cb85c; }
+  .badge-tool_result.err { background: #2a0d0d; color: #d9534f; }
+  .badge-done { background: #0d2010; color: #5cb85c; }
+  .badge-error { background: #2a0d0d; color: #d9534f; }
+  .event-title { font-size: 13px; flex: 1; }
+  .event-meta { font-size: 11px; color: #444; }
+  .event-body { display: none; border-top: 1px solid #1a1a1a; background: #080808; }
+  .event-body.open { display: block; }
+
+  /* Message rendering */
+  .msg-list { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .msg-block { border-radius: 6px; overflow: hidden; }
+  .msg-block-hdr { padding: 6px 10px; font-size: 11px; font-weight: 600; display: flex; justify-content: space-between; }
+  .msg-block-body { padding: 8px 10px; font-size: 12px; font-family: monospace; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; line-height: 1.5; }
+  .role-user .msg-block-hdr { background: #1a2a3a; color: #6ab0ff; }
+  .role-user .msg-block-body { background: #0d1520; color: #c8d8e8; }
+  .role-assistant .msg-block-hdr { background: #1a2a1a; color: #6abf6a; }
+  .role-assistant .msg-block-body { background: #0d150d; color: #c8e8c8; }
+  .block-text .msg-block-hdr { background: #1e1e1e; color: #888; }
+  .block-text .msg-block-body { background: #111; color: #ccc; }
+  .block-tool_use .msg-block-hdr { background: #2a1f00; color: #d4a017; }
+  .block-tool_use .msg-block-body { background: #150f00; color: #e8d090; }
+  .block-tool_result .msg-block-hdr { background: #0d2010; color: #5cb85c; }
+  .block-tool_result .msg-block-body { background: #060d06; color: #a8d8a8; }
+  .block-tool_result.err .msg-block-hdr { background: #2a0d0d; color: #d9534f; }
+  .block-tool_result.err .msg-block-body { background: #150606; color: #e8a8a8; }
+  .block-thinking .msg-block-hdr { background: #1a1a2a; color: #8888cc; }
+  .block-thinking .msg-block-body { background: #0d0d15; color: #a8a8cc; font-style: italic; }
+  .toggle-btn { font-size: 10px; color: #555; cursor: pointer; background: none; border: none; padding: 0; }
+  .toggle-btn:hover { color: #aaa; }
+  .msg-block-body.collapsed { display: none; }
+  .collapse-icon { font-size: 10px; color: #444; flex-shrink: 0; }
+  .preview { font-size: 11px; color: #444; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 8px; }
+  .msg-block-hdr { cursor: pointer; }
+  .msg-block-hdr:hover { opacity: 0.8; }
+  .block-system .msg-block-hdr { background: #1a1a2a; color: #8888cc; }
+  .block-system .msg-block-body { background: #0d0d15; color: #a8a8cc; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>执行历史</h2>
+    </div>
+    <div id="trace-list"></div>
+  </div>
+  <div class="main">
+    <div id="main-content"><div style="color:#555;padding:40px;text-align:center">选择左侧一条执行记录</div></div>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+let sessionId = params.get("session");
+const initTraceId = params.get("trace");
+
+async function loadList() {
+  let list;
+  if (sessionId) {
+    const res = await fetch(`/api/traces/${sessionId}`);
+    list = await res.json();
+  } else {
+    const res = await fetch(`/api/traces`);
+    list = await res.json();
+  }
+  if (!list || list.length === 0) {
+    document.getElementById("trace-list").innerHTML = '<div style="color:#555;padding:12px;font-size:13px">暂无执行记录</div>';
+    return;
+  }
+  const el = document.getElementById("trace-list");
+  el.innerHTML = list.map(t => `
+    <div class="trace-item" id="ti-${t.id}" onclick="selectTrace('${t.id}', '${t.sessionId || sessionId}')">
+      <div class="msg">${esc(t.userMessage)}</div>
+      <div class="meta">${t.model} · ${t.eventCount} events · ${t.endTs ? ((t.endTs-t.startTs)/1000).toFixed(1)+'s' : 'running'}</div>
+    </div>
+  `).join("");
+  const first = initTraceId || list[0]?.id;
+  const firstSession = list[0]?.sessionId || sessionId;
+  if (first) selectTrace(first, firstSession);
+}
+
+async function selectTrace(tid, sid) {
+  if (sid) sessionId = sid;
+  document.querySelectorAll(".trace-item").forEach(e => e.classList.remove("active"));
+  document.getElementById("ti-"+tid)?.classList.add("active");
+  history.replaceState(null,"",`?session=${sessionId}&trace=${tid}`);
+  const res = await fetch(`/api/traces/${sessionId}/${tid}`);
+  if (!res.ok) return;
+  const trace = await res.json();
+  renderTrace(trace);
+}
+
+function renderTrace(trace) {
+  const llmCalls = trace.events.filter(e => e.type==="llm_call").length;
+  const toolCalls = trace.events.filter(e => e.type==="tool_call").length;
+  const errors = trace.events.filter(e => e.type==="error"||(e.type==="tool_result"&&e.is_error)).length;
+  const totalMs = trace.endTs ? trace.endTs - trace.startTs : null;
+
+  const doneEvent = trace.events.find(e => e.type === "done");
+  const totalUsage = doneEvent?.totalUsage;
+
+  document.getElementById("main-content").innerHTML = `
+    <div class="main-header">
+      <h1>${esc(trace.userMessage)}</h1>
+      <div class="meta">${trace.model} · ${new Date(trace.startTs).toLocaleString()}</div>
+    </div>
+    <div class="summary">
+      <div class="stat">LLM 调用 <span>${llmCalls}</span></div>
+      <div class="stat">工具调用 <span>${toolCalls}</span></div>
+      <div class="stat">错误 <span style="${errors>0?'color:#d9534f':''}">${errors}</span></div>
+      ${totalMs ? `<div class="stat">总耗时 <span>${(totalMs/1000).toFixed(1)}s</span></div>` : ''}
+      ${totalUsage ? `
+        <div class="stat">Input <span>${totalUsage.input_tokens?.toLocaleString()}</span></div>
+        <div class="stat">Output <span>${totalUsage.output_tokens?.toLocaleString()}</span></div>
+        <div class="stat">Cache 创建 <span>${(totalUsage.cache_creation_input_tokens||0).toLocaleString()}</span></div>
+        <div class="stat">Cache 命中 <span style="${totalUsage.cache_read_input_tokens>0?'color:#4caf50':''}">${(totalUsage.cache_read_input_tokens||0).toLocaleString()}</span></div>
+      ` : ''}
+    </div>
+    <div id="events">${trace.events.map((e,i) => renderEvent(e,i)).join("")}</div>
+  `;
+}
+
+function renderEvent(e, i) {
+  const isErr = e.type==="error"||(e.type==="tool_result"&&e.is_error);
+  const badgeClass = `badge badge-${e.type}${isErr?" err":""}`;
+
+  const titles = {
+    llm_call: `LLM 调用 #${e.iteration+1}`,
+    llm_response: `LLM 响应 #${e.iteration+1}`,
+    tool_call: `工具调用: ${e.name}`,
+    tool_result: `工具结果: ${e.name}`,
+    done: "完成",
+    error: "错误",
+  };
+
+  const usageStr = e.usage ? ` · in:${e.usage.input_tokens} out:${e.usage.output_tokens}${e.usage.cache_read_input_tokens ? ' cache:'+e.usage.cache_read_input_tokens : ''}` : '';
+  const metas = {
+    llm_call: `${e.messages?.length ?? 0} 条消息`,
+    llm_response: `stop: ${e.stopReason}${usageStr}`,
+    tool_call: "",
+    tool_result: `${e.durationMs}ms${e.is_error?" · ERROR":""}`,
+    done: `${e.totalMs}ms`,
+    error: "",
+  };
+
+  return `<div class="event">
+    <div class="event-hdr" onclick="toggleEvent(${i})">
+      <span class="${badgeClass}">${e.type}</span>
+      <span class="event-title">${titles[e.type]||e.type}</span>
+      <span class="event-meta">${metas[e.type]||""}</span>
+    </div>
+    <div class="event-body" id="eb-${i}">${renderEventBody(e)}</div>
+  </div>`;
+}
+
+function renderEventBody(e) {
+  if (e.type === "llm_call") {
+    const sysBlock = e.systemPrompt ? `<div class="msg-block block-system">
+      <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>system prompt</span><span class="collapse-icon">▶</span></div>
+      <div class="msg-block-body collapsed">${esc(e.systemPrompt)}</div>
+    </div>` : "";
+    return `<div class="msg-list">${sysBlock}${(e.messages||[]).map(m => renderMessage(m)).join("")}</div>`;
+  }
+  if (e.type === "llm_response") {
+    return `<div class="msg-list">${renderContentBlocks(e.content||[], "assistant")}</div>`;
+  }
+  if (e.type === "tool_call") {
+    return `<div class="msg-list"><div class="msg-block block-tool_use">
+      <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>input</span><span class="collapse-icon">▶</span></div>
+      <div class="msg-block-body collapsed">${esc(JSON.stringify(e.input, null, 2))}</div>
+    </div></div>`;
+  }
+  if (e.type === "tool_result") {
+    const cls = e.is_error ? "err" : "";
+    return `<div class="msg-list"><div class="msg-block block-tool_result ${cls}">
+      <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>${e.is_error?"ERROR":"result"}</span><span>${e.durationMs}ms</span><span class="collapse-icon">▶</span></div>
+      <div class="msg-block-body collapsed">${esc(e.result)}</div>
+    </div></div>`;
+  }
+  if (e.type === "error") {
+    return `<div class="msg-list"><div class="msg-block block-tool_result err">
+      <div class="msg-block-hdr"><span>error</span></div>
+      <div class="msg-block-body">${esc(e.message)}</div>
+    </div></div>`;
+  }
+  return `<div style="padding:12px;font-size:12px;color:#555">${esc(JSON.stringify(e))}</div>`;
+}
+
+function renderMessage(msg) {
+  const roleClass = `role-${msg.role}`;
+  if (typeof msg.content === "string") {
+    const preview = msg.content.slice(0, 80) + (msg.content.length > 80 ? "..." : "");
+    return `<div class="msg-block ${roleClass}">
+      <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>${msg.role}</span><span class="preview">${esc(preview)}</span><span class="collapse-icon">▶</span></div>
+      <div class="msg-block-body collapsed">${esc(msg.content)}</div>
+    </div>`;
+  }
+  return `<div class="${roleClass}" style="display:flex;flex-direction:column;gap:4px">
+    <div style="font-size:11px;color:#555;padding:2px 0">${msg.role} (${(msg.content||[]).length} blocks)</div>
+    ${renderContentBlocks(msg.content||[], msg.role)}
+  </div>`;
+}
+
+function renderContentBlocks(blocks, role) {
+  return (blocks||[]).map(b => {
+    if (b.type === "text") {
+      const preview = (b.text||"").slice(0, 100) + ((b.text||"").length > 100 ? "..." : "");
+      return `<div class="msg-block block-text">
+        <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>text</span><span class="preview">${esc(preview)}</span><span class="collapse-icon">▶</span></div>
+        <div class="msg-block-body collapsed">${esc(b.text||"")}</div>
+      </div>`;
+    }
+    if (b.type === "thinking") {
+      return `<div class="msg-block block-thinking">
+        <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>thinking</span><span class="preview">${(b.thinking||"").length} chars</span><span class="collapse-icon">▶</span></div>
+        <div class="msg-block-body collapsed">${esc(b.thinking||"")}</div>
+      </div>`;
+    }
+    if (b.type === "tool_use") {
+      const inputPreview = JSON.stringify(b.input).slice(0, 80);
+      return `<div class="msg-block block-tool_use">
+        <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>tool_use: ${esc(b.name)}</span><span class="preview">${esc(inputPreview)}</span><span class="collapse-icon">▶</span></div>
+        <div class="msg-block-body collapsed">${esc(JSON.stringify(b.input, null, 2))}</div>
+      </div>`;
+    }
+    if (b.type === "tool_result") {
+      const cls = b.is_error ? "err" : "";
+      const content = typeof b.content === "string" ? b.content : JSON.stringify(b.content, null, 2);
+      const preview = content.slice(0, 80) + (content.length > 80 ? "..." : "");
+      return `<div class="msg-block block-tool_result ${cls}">
+        <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>tool_result</span><span class="preview">${esc(preview)}</span><span class="collapse-icon">▶</span></div>
+        <div class="msg-block-body collapsed">${esc(content)}</div>
+      </div>`;
+    }
+    return `<div class="msg-block block-text">
+      <div class="msg-block-hdr" onclick="toggleBlock(this)"><span>${esc(b.type)}</span><span class="collapse-icon">▶</span></div>
+      <div class="msg-block-body collapsed">${esc(JSON.stringify(b, null, 2))}</div>
+    </div>`;
+  }).join("");
+}
+
+function toggleEvent(i) {
+  const el = document.getElementById("eb-"+i);
+  el.classList.toggle("open");
+}
+
+function toggleBlock(hdr) {
+  const body = hdr.nextElementSibling;
+  const icon = hdr.querySelector(".collapse-icon");
+  const isCollapsed = body.classList.toggle("collapsed");
+  if (icon) icon.textContent = isCollapsed ? "▶" : "▼";
+}
+
+function esc(s) {
+  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// Listen for parent frame messages
+window.addEventListener("message", (e) => {
+  if (e.data?.type === "openTrace" && e.data.sessionId) {
+    sessionId = e.data.sessionId;
+    loadList();
+    if (e.data.traceId) setTimeout(() => selectTrace(e.data.traceId, e.data.sessionId), 300);
+  }
+});
+
+loadList();
+</script>
+</body>
+</html>

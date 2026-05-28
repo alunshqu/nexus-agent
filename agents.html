@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 模板</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; padding: 24px; }
+h1 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+h2 { font-size: 15px; font-weight: 600; margin: 20px 0 12px; color: #aaa; }
+.section { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+.agent-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid #2a2a2a; border-radius: 8px; margin-bottom: 8px; }
+.agent-item .info { flex: 1; min-width: 0; }
+.agent-item .name { font-weight: 500; font-size: 14px; }
+.agent-item .desc { font-size: 12px; color: #888; margin-top: 4px; }
+.agent-item .meta { font-size: 11px; color: #555; margin-top: 4px; }
+.agent-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
+.agent-item button { background: #222; border: 1px solid #333; border-radius: 6px; padding: 4px 10px; color: #aaa; font-size: 12px; cursor: pointer; }
+.agent-item button.edit-btn:hover { color: #1a6cf5; border-color: #1a6cf5; }
+.agent-item button.del-btn:hover { color: #f44336; border-color: #f44336; }
+input, textarea { width: 100%; background: #111; border: 1px solid #333; border-radius: 8px; padding: 10px 12px; color: #e0e0e0; font-size: 14px; outline: none; margin-bottom: 10px; }
+textarea { resize: vertical; min-height: 120px; font-family: inherit; }
+input:focus, textarea:focus { border-color: #1a6cf5; }
+label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+.row { display: flex; gap: 12px; }
+.row > div { flex: 1; }
+button.primary { background: #1a6cf5; border: none; border-radius: 8px; padding: 10px 16px; color: #fff; cursor: pointer; font-size: 14px; }
+button.primary:hover { opacity: 0.85; }
+button.secondary { background: #222; border: 1px solid #333; border-radius: 8px; padding: 10px 16px; color: #aaa; cursor: pointer; font-size: 14px; }
+.status { font-size: 13px; margin-top: 8px; }
+.status.ok { color: #4caf50; }
+.status.err { color: #f44336; }
+.empty { color: #555; font-size: 13px; padding: 20px; text-align: center; }
+
+/* Multi-select tool picker */
+.tool-picker { border: 1px solid #333; border-radius: 8px; background: #111; margin-bottom: 10px; }
+.tool-picker-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; cursor: pointer; user-select: none; font-size: 13px; color: #aaa; }
+.tool-picker-header:hover { color: #e0e0e0; }
+.tool-picker-body { display: none; padding: 8px 12px 12px; border-top: 1px solid #222; max-height: 240px; overflow-y: auto; }
+.tool-picker-body.open { display: block; }
+.tool-group { margin-bottom: 10px; }
+.tool-group-label { font-size: 11px; color: #555; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.tool-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tool-chip { display: flex; align-items: center; gap: 4px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; color: #aaa; transition: all 0.1s; }
+.tool-chip:hover { border-color: #555; color: #e0e0e0; }
+.tool-chip.selected { background: #0d2a5e; border-color: #1a6cf5; color: #6aabff; }
+.tool-chip input[type=checkbox] { display: none; }
+.selected-summary { font-size: 12px; color: #888; }
+.selected-summary.has-selection { color: #6aabff; }
+</style>
+</head>
+<body>
+<h1>子 Agent 模板</h1>
+
+<div class="section">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h2 style="margin:0">已有模板</h2>
+  </div>
+  <div id="agent-list"><div class="empty">加载中...</div></div>
+</div>
+
+<div class="section">
+  <h2 style="margin-top:0" id="form-title">新增模板</h2>
+  <label>名称（唯一标识，英文下划线）</label>
+  <input type="text" id="f-name" placeholder="search_agent">
+  <label>描述（主 agent 用来判断何时调用）</label>
+  <input type="text" id="f-desc" placeholder="专门负责网络搜索和信息收集">
+  <label>System Prompt</label>
+  <textarea id="f-prompt" placeholder="你是一个专业的..."></textarea>
+  <div class="row">
+    <div>
+      <label>允许的工具（留空 = 全部）</label>
+      <div class="tool-picker" id="tool-picker">
+        <div class="tool-picker-header" id="tool-picker-toggle">
+          <span class="selected-summary" id="tool-summary">点击选择工具...</span>
+          <span id="picker-arrow">▼</span>
+        </div>
+        <div class="tool-picker-body" id="tool-picker-body"></div>
+      </div>
+    </div>
+    <div>
+      <label>最大迭代次数</label>
+      <input type="number" id="f-max" placeholder="20" min="1" max="100">
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="primary" id="save-btn">保存</button>
+    <button class="secondary" id="cancel-btn" style="display:none">取消</button>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<script>
+let editingName = null;
+let allTools = [];
+let selectedTools = new Set();
+
+const TOOL_GROUPS = [
+  { label: "文件系统", prefix: ["read_file", "write_file", "edit_file", "list_dir", "glob", "grep"] },
+  { label: "Shell", prefix: ["bash"] },
+  { label: "网络", prefix: ["web_search", "web_fetch"] },
+  { label: "浏览器", prefix: ["browser_"] },
+  { label: "记忆", prefix: ["memory_"] },
+  { label: "MCP", prefix: ["mcp_"] },
+];
+
+function groupTools(tools) {
+  const groups = TOOL_GROUPS.map(g => ({ label: g.label, tools: [] }));
+  const other = [];
+  for (const t of tools) {
+    let matched = false;
+    for (let i = 0; i < TOOL_GROUPS.length; i++) {
+      if (TOOL_GROUPS[i].prefix.some(p => t === p || t.startsWith(p))) {
+        groups[i].tools.push(t);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) other.push(t);
+  }
+  if (other.length) groups.push({ label: "其他", tools: other });
+  return groups.filter(g => g.tools.length > 0);
+}
+
+async function initToolPicker() {
+  const res = await fetch("/api/tools");
+  allTools = await res.json();
+  const body = document.getElementById("tool-picker-body");
+  const groups = groupTools(allTools);
+  body.innerHTML = groups.map(g => `
+    <div class="tool-group">
+      <div class="tool-group-label">${g.label}</div>
+      <div class="tool-chips">
+        ${g.tools.map(t => `<label class="tool-chip" data-tool="${t}"><input type="checkbox" value="${t}">${t}</label>`).join("")}
+      </div>
+    </div>
+  `).join("");
+  body.querySelectorAll(".tool-chip").forEach(chip => {
+    chip.addEventListener("click", (e) => {
+      e.preventDefault();
+      const tool = chip.dataset.tool;
+      if (selectedTools.has(tool)) { selectedTools.delete(tool); chip.classList.remove("selected"); }
+      else { selectedTools.add(tool); chip.classList.add("selected"); }
+      updateSummary();
+    });
+  });
+}
+
+function updateSummary() {
+  const el = document.getElementById("tool-summary");
+  if (selectedTools.size === 0) { el.textContent = "全部工具（留空）"; el.className = "selected-summary"; }
+  else { el.textContent = `已选 ${selectedTools.size} 个工具`; el.className = "selected-summary has-selection"; }
+}
+
+document.getElementById("tool-picker-toggle").addEventListener("click", () => {
+  const body = document.getElementById("tool-picker-body");
+  const arrow = document.getElementById("picker-arrow");
+  body.classList.toggle("open");
+  arrow.textContent = body.classList.contains("open") ? "▲" : "▼";
+});
+
+function setSelectedTools(tools) {
+  selectedTools = new Set(tools || []);
+  document.querySelectorAll(".tool-chip").forEach(chip => {
+    chip.classList.toggle("selected", selectedTools.has(chip.dataset.tool));
+  });
+  updateSummary();
+}
+
+async function load() {
+  const res = await fetch("/api/agents");
+  const templates = await res.json();
+  const list = document.getElementById("agent-list");
+  if (!templates.length) { list.innerHTML = '<div class="empty">暂无模板</div>'; return; }
+  list.innerHTML = templates.map(t => `
+    <div class="agent-item">
+      <div class="info">
+        <div class="name">${t.name}</div>
+        <div class="desc">${t.description || ""}</div>
+        <div class="meta">${t.tools ? "工具: " + t.tools.join(", ") : "工具: 全部"} · 最大迭代: ${t.maxIterations ?? 20}</div>
+      </div>
+      <div class="actions">
+        <button class="edit-btn" onclick="editTemplate(${JSON.stringify(JSON.stringify(t))})">编辑</button>
+        <button class="del-btn" onclick="deleteTemplate('${t.name}')">删除</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function editTemplate(jsonStr) {
+  const t = JSON.parse(jsonStr);
+  editingName = t.name;
+  document.getElementById("f-name").value = t.name;
+  document.getElementById("f-desc").value = t.description || "";
+  document.getElementById("f-prompt").value = t.systemPrompt || "";
+  setSelectedTools(t.tools || []);
+  document.getElementById("f-max").value = t.maxIterations ?? "";
+  document.getElementById("form-title").textContent = "编辑模板";
+  document.getElementById("cancel-btn").style.display = "";
+  document.getElementById("f-name").focus();
+}
+
+document.getElementById("cancel-btn").addEventListener("click", () => {
+  editingName = null;
+  document.getElementById("f-name").value = "";
+  document.getElementById("f-desc").value = "";
+  document.getElementById("f-prompt").value = "";
+  setSelectedTools([]);
+  document.getElementById("f-max").value = "";
+  document.getElementById("form-title").textContent = "新增模板";
+  document.getElementById("cancel-btn").style.display = "none";
+  document.getElementById("status").textContent = "";
+  document.getElementById("tool-picker-body").classList.remove("open");
+  document.getElementById("picker-arrow").textContent = "▼";
+});
+
+document.getElementById("save-btn").addEventListener("click", async () => {
+  const name = document.getElementById("f-name").value.trim();
+  const prompt = document.getElementById("f-prompt").value.trim();
+  if (!name || !prompt) { setStatus("名称和 System Prompt 不能为空", true); return; }
+  const maxStr = document.getElementById("f-max").value.trim();
+  const template = {
+    name,
+    description: document.getElementById("f-desc").value.trim(),
+    systemPrompt: prompt,
+    tools: selectedTools.size > 0 ? [...selectedTools] : undefined,
+    maxIterations: maxStr ? Number(maxStr) : undefined,
+  };
+  const res = await fetch("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(template) });
+  const data = await res.json();
+  if (data.ok) {
+    setStatus("已保存", false);
+    document.getElementById("cancel-btn").click();
+    load();
+  } else {
+    setStatus(data.error || "保存失败", true);
+  }
+});
+
+async function deleteTemplate(name) {
+  if (!confirm(`删除 ${name}？`)) return;
+  await fetch(`/api/agents/${encodeURIComponent(name)}`, { method: "DELETE" });
+  load();
+}
+
+function setStatus(msg, isErr) {
+  const el = document.getElementById("status");
+  el.textContent = msg;
+  el.className = "status " + (isErr ? "err" : "ok");
+}
+
+initToolPicker().then(() => { updateSummary(); load(); });
+</script>
+</body>
+</html>

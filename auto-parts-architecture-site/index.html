@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>汽车零配件门店备补货方案总览</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+
+    :root{--bg:#f5f7fb;--card:#fff;--text:#172033;--muted:#607086;--line:#d8dee9;--blue:#2563eb;--green:#059669;--orange:#ea580c;--purple:#7c3aed;--teal:#0f766e;--yellow:#b45309;--slate:#334155;--red:#dc2626;--shadow:0 12px 30px rgba(15,23,42,.08);--r:18px}
+    *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#f8fbff,var(--bg));font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--text)}
+    .page{max-width:1880px;margin:0 auto;padding:28px}.hero{background:linear-gradient(135deg,#1d4ed8,#0f766e);color:#fff;border-radius:26px;padding:28px 32px;box-shadow:var(--shadow);margin-bottom:18px}.hero h1{margin:0 0 10px;font-size:34px}.hero p{margin:0;line-height:1.75;font-size:15px;opacity:.96}.nav{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px}.nav a{text-decoration:none;background:#fff;color:#1f3b68;border:1px solid var(--line);padding:10px 14px;border-radius:999px;box-shadow:0 4px 12px rgba(15,23,42,.04);font-weight:700}.nav a.active{background:#2563eb;color:#fff;border-color:#2563eb}
+    .section{background:#fff;border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow);padding:20px;margin-bottom:18px}.section h2{margin:0 0 14px;font-size:23px}.section .sub{margin:-6px 0 16px;color:var(--muted);font-size:14px;line-height:1.7}.goals{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}.goal{border-radius:16px;padding:15px;min-height:112px;background:#eff6ff;border:1px solid #bfdbfe}.goal strong{display:block;color:#1e40af;margin-bottom:8px}.goal span{font-size:13px;color:#475569;line-height:1.6}.goal:nth-child(2){background:#ecfdf5;border-color:#a7f3d0}.goal:nth-child(2) strong{color:#047857}.goal:nth-child(3){background:#fff7ed;border-color:#fed7aa}.goal:nth-child(3) strong{color:#c2410c}.goal:nth-child(4){background:#f5f3ff;border-color:#ddd6fe}.goal:nth-child(4) strong{color:#6d28d9}.goal:nth-child(5){background:#f0fdfa;border-color:#99f6e4}.goal:nth-child(5) strong{color:#0f766e}.goal:nth-child(6){background:#fef3c7;border-color:#fde68a}.goal:nth-child(6) strong{color:#92400e}
+    .boundary{display:grid;grid-template-columns:1fr 1.1fr;gap:14px}.box{border-radius:18px;border:1px solid var(--line);padding:16px;background:#fbfcfe}.box h3{margin:0 0 10px;font-size:18px}.box ul{margin:0;padding-left:20px;color:var(--muted);line-height:1.72;font-size:14px}.box.exist{background:#f8fafc}.box.new{background:#ecfdf5;border-color:#a7f3d0}.box.new h3{color:#047857}.box.exist h3{color:#334155}
+    .objects{display:grid;grid-template-columns:repeat(8,1fr);gap:10px}.obj{border-radius:14px;padding:13px;text-align:center;background:#f8fafc;border:1px solid #e2e8f0}.obj strong{display:block;margin-bottom:5px}.obj span{font-size:12px;color:var(--muted);line-height:1.45}.relations{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}.rel{background:#fff;border:1px dashed #cbd5e1;border-radius:999px;padding:7px 10px;color:#475569;font-size:13px}
+    .chain{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;align-items:stretch}.node{position:relative;border-radius:16px;padding:14px;min-height:130px;border:1px solid #dbe3ef;background:#f8fafc}.node:after{content:"→";position:absolute;right:-12px;top:45%;font-weight:900;color:#94a3b8}.node:last-child:after{display:none}.node .num{display:inline-flex;width:26px;height:26px;border-radius:50%;background:#334155;color:#fff;align-items:center;justify-content:center;font-size:13px;font-weight:800;margin-bottom:8px}.node h3{margin:0 0 7px;font-size:15px}.node p{margin:0;color:#607086;font-size:12.5px;line-height:1.6}.node.decision{background:#fff7ed;border-color:#fdba74}.node.decision .num{background:#ea580c}.node.feedback{background:#fef3c7;border-color:#fcd34d}.node.feedback .num{background:#b45309}.node.base{background:#eff6ff;border-color:#bfdbfe}.node.base .num{background:#2563eb}
+    .cap-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:12px}.cap{border-radius:18px;padding:15px;border:1px solid #dbe3ef;min-height:220px}.cap h3{margin:0 0 10px;font-size:17px}.cap ul{margin:0;padding-left:18px;color:#607086;font-size:13px;line-height:1.65}.cap small{display:block;color:#334155;font-weight:800;margin-bottom:8px}.c1{background:#eff6ff;border-color:#bfdbfe}.c1 h3{color:#1d4ed8}.c2{background:#ecfdf5;border-color:#a7f3d0}.c2 h3{color:#047857}.c3{background:#f5f3ff;border-color:#ddd6fe}.c3 h3{color:#6d28d9}.c4{background:#fff7ed;border-color:#fed7aa}.c4 h3{color:#c2410c}.c5{background:#f0fdfa;border-color:#99f6e4}.c5 h3{color:#0f766e}.c6{background:#f8fafc;border-color:#cbd5e1}.c6 h3{color:#334155}.c7{background:#fef3c7;border-color:#fde68a}.c7 h3{color:#92400e}
+    .decision-wrap{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.decision-card{border-radius:18px;border:1px solid #fed7aa;background:#fff7ed;padding:16px}.decision-card h3{margin:0 0 10px;color:#c2410c}.cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mini{background:#fff;border:1px solid #fde68a;border-radius:14px;padding:12px}.mini strong{display:block;margin-bottom:7px}.mini ul{margin:0;padding-left:17px;color:#607086;font-size:13px;line-height:1.6}
+    .loop{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.metric{background:#fefce8;border:1px solid #fde68a;border-radius:14px;padding:12px}.metric strong{display:block;color:#92400e;margin-bottom:7px}.metric ul{margin:0;padding-left:17px;color:#607086;font-size:12.5px;line-height:1.55}.return{background:#f8fafc;border:1px dashed #94a3b8;border-radius:18px;padding:16px}.return h3{margin:0 0 10px;color:#334155}.return p{margin:0 0 10px;color:#607086;line-height:1.65;font-size:14px}.return .pill{display:inline-block;background:#fff;border:1px solid #cbd5e1;border-radius:999px;padding:5px 9px;margin:3px;color:#475569;font-size:12px}
+    .landing{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.land{background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:15px;min-height:140px}.land h3{margin:0 0 9px}.land p{margin:0;color:#607086;font-size:13px;line-height:1.65}.quote{background:#0f172a;color:#e2e8f0;border-radius:18px;padding:18px;line-height:1.8;font-size:15px}.quote strong{color:#fff}
+    @media(max-width:1500px){.goals{grid-template-columns:repeat(3,1fr)}.chain{grid-template-columns:repeat(4,1fr)}.node:nth-child(4):after{display:none}.cap-grid{grid-template-columns:repeat(3,1fr)}.objects{grid-template-columns:repeat(4,1fr)}.metrics{grid-template-columns:repeat(3,1fr)}}@media(max-width:900px){.page{padding:14px}.goals,.boundary,.chain,.cap-grid,.decision-wrap,.loop,.metrics,.landing,.objects{grid-template-columns:1fr}.node:after{display:none}.hero h1{font-size:26px}}@media print{body{background:#fff}.page{max-width:none;padding:8mm}.section,.hero{box-shadow:none}.nav{display:none}}
+  
+    .page{max-width:1880px}
+    .content-view{display:none}
+    .content-view.active{display:block;animation:fadeIn .16s ease-out}
+    .view-head{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:16px;position:sticky;top:10px;z-index:10}
+    .view-head strong{font-size:18px;color:var(--text)}
+    .view-head button{border:1px solid var(--line);background:#fff;color:#1f3b68;border-radius:999px;padding:8px 13px;font-weight:700;cursor:pointer}
+    .view-head button:hover{background:#eff6ff;border-color:#bfdbfe}
+    #contentHost .hero,#contentHost .top,#contentHost .nav{display:none!important}
+    #contentHost .page{max-width:none;margin:0;padding:0}
+    #contentHost .section:first-child,#contentHost .card:first-child,#contentHost .lane:first-child{margin-top:0}
+    @keyframes fadeIn{from{opacity:.35;transform:translateY(4px)}to{opacity:1;transform:none}}
+  </style>
+</head>
+<body>
+<div class="page">
+  <section class="top">
+    <h1>汽车零配件门店备补货整体落地方案</h1>
+    <p>从业务架构到流程、应用、数据、组织、路线图和需求清单的一体化方案包。核心原则：已有交易平台复用，新建备补货闭环。</p>
+  </section>
+
+  <nav class="nav" id="mainNav">
+    <a class="active" href="index.html" data-view="overview">总览</a>
+    <a href="#business-architecture-final.html" data-view="business-architecture-final.html" data-title="业务架构">业务架构</a>
+    <a href="#process.html" data-view="process.html" data-title="业务流程">业务流程</a>
+    <a href="#application.html" data-view="application.html" data-title="应用架构">应用架构</a>
+    <a href="#data-architecture.html" data-view="data-architecture.html" data-title="数据架构">数据架构</a>
+    <a href="#organization.html" data-view="organization.html" data-title="组织运营">组织运营</a>
+    <a href="#roadmap.html" data-view="roadmap.html" data-title="路线图">路线图</a>
+    <a href="#requirements.html" data-view="requirements.html" data-title="需求清单">需求清单</a>
+    <a href="#discussion-notes.md" data-view="discussion-notes.md" data-title="讨论沉淀">讨论沉淀</a>
+  </nav>
+
+  <main id="overviewContent" class="content-view active">
+    <div class="grid g3">
+      <div class="card"><h2>1. 业务架构</h2><p>明确业务目标、边界、业务对象、主链路、关键决策和评价闭环。</p><a class="link" href="#business-architecture-final.html" data-view="business-architecture-final.html" data-title="业务架构">查看业务架构 →</a></div>
+      <div class="card"><h2>2. 业务流程</h2><p>把能力落到流程：谁发起、谁审核、系统怎么流转、异常怎么处理。</p><a class="link" href="#process.html" data-view="process.html" data-title="业务流程">查看业务流程 →</a></div>
+      <div class="card"><h2>3. 应用架构</h2><p>反推系统能力：商品适配、策略、计划、供应商、库存、评价分析。</p><a class="link" href="#application.html" data-view="application.html" data-title="应用架构">查看应用架构 →</a></div>
+      <div class="card"><h2>4. 数据架构</h2><p>统一主数据、交易数据、库存数据、策略参数和指标口径。</p><a class="link" href="#data-architecture.html" data-view="data-architecture.html" data-title="数据架构">查看数据架构 →</a></div>
+      <div class="card"><h2>5. 组织运营</h2><p>明确商品运营、计划、采购、门店、数据、技术职责和运营机制。</p><a class="link" href="#organization.html" data-view="organization.html" data-title="组织运营">查看组织运营 →</a></div>
+      <div class="card"><h2>6. 路线与需求</h2><p>形成三阶段路线图与 MVP/后续需求清单，支撑项目立项与排期。</p><a class="link" href="#roadmap.html" data-view="roadmap.html" data-title="路线图">查看路线图 →</a></div>
+    </div>
+    <section class="card" style="margin-top:16px"><h2>总体链路</h2><div class="lane"><div class="lane-title blue">从架构到落地</div><div class="lane-body"><div class="box"><strong>业务目标</strong><span>现货率、周转、转化、门店铺货、品牌落地</span></div><div class="box"><strong>业务能力</strong><span>选品、计划、供应、库存、协同、评价</span></div><div class="box"><strong>业务流程</strong><span>选品、补货、供应商、铺货、复盘</span></div><div class="box"><strong>系统建设</strong><span>策略中心、计划中心、库存中心、分析中心</span></div><div class="box"><strong>运营迭代</strong><span>指标复盘、参数调整、供应商优化</span></div></div></div></section>
+  </main>
+
+  <main id="detailContent" class="content-view">
+    <div class="view-head">
+      <strong id="viewerTitle">业务架构</strong>
+      <button type="button" id="backOverview">返回总览</button>
+    </div>
+    <div id="contentHost"></div>
+  </main>
+
+<template id="tpl-business-architecture-final.html">
+<section class="section">
+    <h2>一、业务目标：为什么建设这套能力</h2>
+    <p class="sub">业务架构首先服务业务目标。目标不是做一个库存系统，而是提升平台交易和门店前置供给能力。</p>
+    <div class="goals">
+      <div class="goal"><strong>提升现货率</strong><span>让高频、刚需、区域适配商品提前到门店或区域仓。</span></div>
+      <div class="goal"><strong>降低缺货与流失</strong><span>用交易、询价、缺货数据驱动备货，减少有需求无货。</span></div>
+      <div class="goal"><strong>提升库存周转</strong><span>避免盲目铺货，控制滞销、呆滞和资金占用。</span></div>
+      <div class="goal"><strong>提升平台转化</strong><span>库存能力回写交易平台，提升报价、下单和履约成功率。</span></div>
+      <div class="goal"><strong>支撑城市店/下沉店</strong><span>形成区域化、门店化、分层级的铺货和补货能力。</span></div>
+      <div class="goal"><strong>支撑战略品牌</strong><span>把品牌合作、供应政策和门店铺货结合起来落地。</span></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>二、业务边界：已有平台复用，新建备补货闭环</h2>
+    <div class="boundary">
+      <div class="box exist"><h3>已有交易平台能力：复用</h3><ul><li>询价、报价、下单、订单、履约、售后已具备。</li><li>交易平台沉淀历史成交、询价热度、缺货流失、客户偏好、售后质量等数据。</li><li>交易仍在平台完成，门店库存能力通过库存、时效、仓源等方式反哺平台。</li></ul></div>
+      <div class="box new"><h3>新增备补货业务能力：重点建设</h3><ul><li>商品选择：决定哪些商品适合备到区域/门店。</li><li>数量计划：决定首铺量、安全库存、补货点和补货量。</li><li>供应选择：决定主供/备供、采购来源和替代供应方案。</li><li>门店库存：承接铺货、补货、调拨、清退和库存共享。</li><li>评价迭代：用动销、缺货、周转、售后、供应表现修正策略。</li></ul></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>三、核心业务对象：业务能力围绕这些对象运转</h2>
+    <p class="sub">业务架构必须先明确业务对象，否则后续流程、系统和数据都会散。</p>
+    <div class="objects">
+      <div class="obj"><strong>车型</strong><span>品牌/车系/年款/排量</span></div><div class="obj"><strong>OE</strong><span>原厂号/替代号/号段</span></div><div class="obj"><strong>商品</strong><span>SKU/品类/适配</span></div><div class="obj"><strong>品牌品质</strong><span>品牌/价格带/质量层级</span></div><div class="obj"><strong>门店</strong><span>城市店/下沉店/等级</span></div><div class="obj"><strong>区域</strong><span>城市等级/车型保有量</span></div><div class="obj"><strong>供应商</strong><span>主供/备供/区域能力</span></div><div class="obj"><strong>库存</strong><span>可售/安全/在途/滞销</span></div>
+    </div>
+    <div class="relations"><span class="rel">车型 ↔ OE ↔ 商品</span><span class="rel">商品 ↔ 品牌/品质/价格带</span><span class="rel">商品 ↔ 区域 ↔ 门店</span><span class="rel">商品 ↔ 供应商 ↔ 采购来源</span><span class="rel">门店库存 ↔ 平台订单履约</span></div>
+  </section>
+
+  <section class="section">
+    <h2>四、业务主链路：从数据输入到评价迭代</h2>
+    <p class="sub">主链路把所有能力串起来，其中“备什么、备多少、向谁备”是关键决策点，不是一级分类标准。</p>
+    <div class="chain">
+      <div class="node base"><span class="num">1</span><h3>数据输入</h3><p>交易、询价、缺货、售后、车型保有量、城市消费等级、供应政策、人工经验。</p></div>
+      <div class="node base"><span class="num">2</span><h3>商品与适配底座</h3><p>车型、OE、适配、品牌品质、套件/单件、单车用量，保证选对件、算对量。</p></div>
+      <div class="node decision"><span class="num">3</span><h3>关键决策：备什么</h3><p>确定品类、OE、商品、品牌、品质、价格带、战略品牌、区域选品池。</p></div>
+      <div class="node decision"><span class="num">4</span><h3>关键决策：备多少</h3><p>计算首铺量、安全库存、补货点、补货量、调拨量、清退量。</p></div>
+      <div class="node decision"><span class="num">5</span><h3>关键决策：向谁备</h3><p>选择供应商、品牌方、区域供应资源，形成主供/备供和采购来源。</p></div>
+      <div class="node"><span class="num">6</span><h3>采购补货与门店铺货</h3><p>生成采购、补货、调拨、铺货、清退任务，落到城市店/下沉店/区域仓。</p></div>
+      <div class="node"><span class="num">7</span><h3>平台交易履约协同</h3><p>库存能力回写平台，支撑报价、下单、仓源推荐、履约时效和售后闭环。</p></div>
+      <div class="node feedback"><span class="num">8</span><h3>评价反馈</h3><p>用选品、数量、供应、库存、经营、流程指标反向修正策略和参数。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>五、业务能力域：承载主链路的完整能力体系</h2>
+    <div class="cap-grid">
+      <div class="cap c1"><small>输入与数据</small><h3>数据与业务输入能力</h3><ul><li>交易/询价/报价/订单</li><li>缺货/流失/未成交</li><li>售后/退换/错配</li><li>车型保有量/车龄</li><li>城市消费等级</li><li>人工线下经验</li></ul></div>
+      <div class="cap c2"><small>基础底座</small><h3>商品与适配基础能力</h3><ul><li>车型库</li><li>OE 号体系</li><li>适配关系</li><li>替代关系</li><li>品牌/品质/价格带</li><li>套件/单件/单车用量</li></ul></div>
+      <div class="cap c3"><small>回答备什么</small><h3>商品选择策略能力</h3><ul><li>品类选择策略</li><li>OE/号段策略</li><li>品牌选择策略</li><li>品质选择策略</li><li>战略品牌策略</li><li>区域/门店选品池</li></ul></div>
+      <div class="cap c4"><small>回答备多少</small><h3>数量计划与补货能力</h3><ul><li>销量预测</li><li>需求校准</li><li>首铺量计算</li><li>安全库存</li><li>补货点/补货量</li><li>调拨/清退建议</li></ul></div>
+      <div class="cap c5"><small>回答向谁备</small><h3>供应商选择与采购能力</h3><ul><li>供应商准入</li><li>供应商评分</li><li>主供/备供</li><li>品牌合作</li><li>采购计划</li><li>售后责任闭环</li></ul></div>
+      <div class="cap c6"><small>业务执行</small><h3>门店库存与履约协同能力</h3><ul><li>城市店铺货</li><li>下沉店铺货</li><li>区域仓补给</li><li>库存共享</li><li>店间/仓店调拨</li><li>平台库存回写</li></ul></div>
+      <div class="cap c7"><small>持续优化</small><h3>评价与策略迭代能力</h3><ul><li>选品评价</li><li>数量评价</li><li>供应评价</li><li>库存评价</li><li>经营评价</li><li>策略参数迭代</li></ul></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>六、三个关键决策机制：输入、规则、输出</h2>
+    <div class="decision-wrap">
+      <div class="decision-card"><h3>决策一：备什么</h3><div class="cols"><div class="mini"><strong>输入</strong><ul><li>历史交易/询价</li><li>缺货流失</li><li>车型保有量</li><li>城市消费等级</li><li>售后质量</li><li>人工经验</li></ul></div><div class="mini"><strong>输出</strong><ul><li>备货商品池</li><li>区域选品池</li><li>门店铺货清单</li><li>品牌品质组合</li><li>替代/不备清单</li></ul></div></div></div>
+      <div class="decision-card"><h3>决策二：备多少</h3><div class="cols"><div class="mini"><strong>输入</strong><ul><li>历史销量</li><li>销量预测</li><li>询价缺货</li><li>单车用量</li><li>套件/单件</li><li>补货周期</li></ul></div><div class="mini"><strong>输出</strong><ul><li>首铺量</li><li>安全库存</li><li>补货点</li><li>补货量</li><li>调拨量</li><li>清退量</li></ul></div></div></div>
+      <div class="decision-card"><h3>决策三：向谁备</h3><div class="cols"><div class="mini"><strong>输入</strong><ul><li>价格</li><li>库存深度</li><li>交期</li><li>质量</li><li>区域能力</li><li>售后政策</li></ul></div><div class="mini"><strong>输出</strong><ul><li>推荐供应商</li><li>主供/备供</li><li>采购来源</li><li>替代供应</li><li>供应商分层</li></ul></div></div></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>七、评价闭环：不是报表，是策略迭代机制</h2>
+    <div class="loop">
+      <div class="metrics">
+        <div class="metric"><strong>选品评价</strong><ul><li>选品命中率</li><li>动销率</li><li>转化率</li><li>错配率</li></ul></div>
+        <div class="metric"><strong>数量评价</strong><ul><li>缺货率</li><li>现货率</li><li>周转天数</li><li>滞销率</li></ul></div>
+        <div class="metric"><strong>供应评价</strong><ul><li>到货及时率</li><li>质量问题率</li><li>价格竞争力</li><li>售后闭环率</li></ul></div>
+        <div class="metric"><strong>经营评价</strong><ul><li>销售额</li><li>毛利率</li><li>平台转化</li><li>复购率</li></ul></div>
+        <div class="metric"><strong>流程评价</strong><ul><li>补货周期</li><li>调拨周期</li><li>异常处理</li><li>人工干预</li></ul></div>
+      </div>
+      <div class="return"><h3>评价结果反向修正</h3><p>评价不是事后看板，而是策略闭环。每一次销售、缺货、滞销、退货和供应异常，都要沉淀为下一轮决策参数。</p><span class="pill">商品选择策略</span><span class="pill">补货参数</span><span class="pill">供应商评分</span><span class="pill">门店铺货策略</span><span class="pill">品牌品质组合</span><span class="pill">人工经验规则</span></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>八、业务架构对落地的指导</h2>
+    <div class="landing">
+      <div class="land"><h3>指导流程设计</h3><p>拆出选品流程、补货流程、供应商选择流程、铺货调拨流程、评价复盘流程。</p></div>
+      <div class="land"><h3>指导系统建设</h3><p>形成商品中心、适配库、策略中心、计划引擎、供应商管理、库存中心、分析看板。</p></div>
+      <div class="land"><h3>指导组织分工</h3><p>明确商品运营、供应链计划、采购、门店运营、数据产品、技术的责任边界。</p></div>
+      <div class="land"><h3>指导运营机制</h3><p>建立商品池维护、铺货审核、补货参数调整、供应商复盘、滞销处理机制。</p></div>
+      <div class="land"><h3>指导阶段路线</h3><p>从人工规则闭环，到半自动策略，再到智能选品、智能补货和智能供应推荐。</p></div>
+    </div>
+  </section>
+
+  <section class="quote"><strong>架构原则：</strong>用业务目标牵引建设方向，用业务边界避免重复造轮子，用业务对象稳定数据口径，用主链路串起能力，用关键决策回答“备什么、备多少、向谁备”，用评价闭环持续优化选品、数量、供应商和门店库存策略。</section>
+</template>
+<template id="tpl-process.html">
+<div class="lane"><div class="lane-title blue">1. 商品选品流程</div><div class="lane-body"><div class="box"><strong>数据输入</strong><span>交易、询价、缺货、售后、车型保有量、人工经验</span></div><div class="box"><strong>候选池生成</strong><span>按品类/OE/区域/车型筛出候选商品</span></div><div class="box"><strong>适配校验</strong><span>校验车型、OE、替代关系、套件关系</span></div><div class="box"><strong>策略筛选</strong><span>品牌、品质、价格带、战略品牌、区域差异</span></div><div class="box"><strong>人工复核</strong><span>商品运营确认备货池、区域池、门店清单</span></div></div></div>
+<div class="lane" style="margin-top:16px"><div class="lane-title orange">2. 数量计划流程</div><div class="lane-body"><div class="box"><strong>需求汇总</strong><span>销售、询价、缺货、季节、活动、门店等级</span></div><div class="box"><strong>需求预测</strong><span>区域/门店/SKU 粒度预测基础需求</span></div><div class="box"><strong>参数计算</strong><span>首铺量、安全库存、补货点、补货周期</span></div><div class="box"><strong>约束修正</strong><span>MOQ、箱规、资金、库容、供应交期</span></div><div class="box"><strong>计划输出</strong><span>铺货计划、补货计划、调拨/清退建议</span></div></div></div>
+<div class="lane" style="margin-top:16px"><div class="lane-title teal">3. 供应商选择流程</div><div class="lane-body"><div class="box"><strong>需求确认</strong><span>明确 SKU、数量、区域、时效和品质要求</span></div><div class="box"><strong>供应匹配</strong><span>匹配可供供应商、品牌方、区域库存</span></div><div class="box"><strong>综合评分</strong><span>价格、库存、交期、质量、售后、稳定性</span></div><div class="box"><strong>主备选择</strong><span>形成主供/备供和替代供应方案</span></div><div class="box"><strong>采购执行</strong><span>生成采购来源、采购单、到货跟踪</span></div></div></div>
+<div class="lane" style="margin-top:16px"><div class="lane-title green">4. 门店铺货与补货流程</div><div class="lane-body"><div class="box"><strong>计划下发</strong><span>铺货/补货/调拨任务下发至采购、仓、门店</span></div><div class="box"><strong>采购/调拨</strong><span>供应商直发、仓到店、店间调拨</span></div><div class="box"><strong>到货入库</strong><span>收货验货、入库、异常登记</span></div><div class="box"><strong>库存共享</strong><span>可售库存回写交易平台，支撑报价履约</span></div><div class="box"><strong>销售触发</strong><span>销售消耗后触发补货、调拨或清退</span></div></div></div>
+<div class="lane" style="margin-top:16px"><div class="lane-title yellow">5. 评价复盘流程</div><div class="lane-body"><div class="box"><strong>数据回收</strong><span>销售、库存、缺货、滞销、售后、供应异常</span></div><div class="box"><strong>指标计算</strong><span>动销、现货、周转、毛利、售后、及时率</span></div><div class="box"><strong>异常识别</strong><span>错备、少备、多备、供应差、门店执行差</span></div><div class="box"><strong>复盘调整</strong><span>调整商品池、补货参数、供应商评分</span></div><div class="box"><strong>策略沉淀</strong><span>形成下一轮规则、模型和人工经验</span></div></div></div>
+<section class="card" style="margin-top:16px"><h2>异常处理</h2><span class="tag">适配不确定 → 人工校验</span><span class="tag">供应不足 → 切换备供</span><span class="tag">门店库容不足 → 降低首铺量</span><span class="tag">滞销预警 → 调拨/促销/清退</span><span class="tag">售后异常 → 冻结商品或供应商</span></section>
+</template>
+<template id="tpl-application.html">
+<div class="grid g3"><div class="card"><h2>商品与适配中心</h2><ul><li>车型库、OE库、适配关系</li><li>商品主数据、品牌品质</li><li>替代关系、套件关系</li><li>适配校验与人工修正</li></ul></div><div class="card"><h2>选品策略中心</h2><ul><li>备货商品池</li><li>区域选品池</li><li>门店铺货清单</li><li>战略品牌策略</li><li>不建议备货清单</li></ul></div><div class="card"><h2>补货计划中心</h2><ul><li>需求预测</li><li>首铺量计算</li><li>安全库存/补货点</li><li>补货、调拨、清退建议</li><li>人工审核与版本管理</li></ul></div><div class="card"><h2>供应商管理</h2><ul><li>供应商档案</li><li>价格、库存、交期</li><li>主供/备供关系</li><li>供应商评分</li><li>售后责任闭环</li></ul></div><div class="card"><h2>采购协同</h2><ul><li>采购计划</li><li>采购单</li><li>到货跟踪</li><li>异常协同</li><li>供应商对账基础</li></ul></div><div class="card"><h2>库存中心</h2><ul><li>门店库存</li><li>区域仓库存</li><li>可售、在途、锁定</li><li>库存共享</li><li>调拨/清退</li></ul></div><div class="card"><h2>门店运营台</h2><ul><li>铺货任务</li><li>补货任务</li><li>收货入库</li><li>异常反馈</li><li>门店库存看板</li></ul></div><div class="card"><h2>交易平台协同</h2><ul><li>库存回写</li><li>报价时效</li><li>订单履约仓源</li><li>缺货反馈</li><li>售后数据回流</li></ul></div><div class="card"><h2>评价分析中心</h2><ul><li>选品评价</li><li>库存评价</li><li>供应商评价</li><li>经营分析</li><li>策略调参建议</li></ul></div></div><section class="card" style="margin-top:16px"><h2>系统集成关系</h2><div class="lane"><div class="lane-title purple">应用协同</div><div class="lane-body"><div class="box"><strong>交易平台</strong><span>提供交易、询价、订单、售后数据；消费库存能力</span></div><div class="box"><strong>商品适配</strong><span>为选品、报价、履约提供车型/OE/SKU基础</span></div><div class="box"><strong>策略计划</strong><span>生成选品、铺货、补货、供应推荐</span></div><div class="box"><strong>供应采购</strong><span>承接采购执行、到货、供应商评分</span></div><div class="box"><strong>库存履约</strong><span>维护门店/仓库存并回写平台</span></div></div></div></section>
+</template>
+<template id="tpl-data-architecture.html">
+<div class="grid g3"><div class="card"><h2>主数据层</h2><ul><li>车型：品牌/车系/年款/排量</li><li>OE：原厂号/替代号/号段</li><li>商品：SKU/品类/单位/箱规</li><li>品牌品质：品牌/价格带/质量层级</li><li>门店/区域/供应商</li></ul></div><div class="card"><h2>业务事实层</h2><ul><li>询价、报价、订单、履约</li><li>销售出库、退换货、售后</li><li>缺货、流失、未成交</li><li>采购、入库、调拨、清退</li><li>库存快照、在途、锁定</li></ul></div><div class="card"><h2>策略参数层</h2><ul><li>备货商品池参数</li><li>区域选品规则</li><li>首铺量参数</li><li>安全库存/补货点</li><li>供应商评分权重</li></ul></div></div><section class="card" style="margin-top:16px"><h2>核心数据流</h2><div class="lane"><div class="lane-title blue">数据流转</div><div class="lane-body"><div class="box"><strong>交易数据</strong><span>询价/报价/订单/售后进入需求与评价模型</span></div><div class="box"><strong>外部数据</strong><span>车型保有量、车龄、城市等级、品牌政策</span></div><div class="box"><strong>主数据映射</strong><span>车型-OE-商品-供应商-门店统一编码</span></div><div class="box"><strong>策略计算</strong><span>选品、补货、供应商推荐生成计划</span></div><div class="box"><strong>结果回流</strong><span>销售、缺货、滞销、售后反向修正参数</span></div></div></div></section><section class="card" style="margin-top:16px"><h2>关键指标口径</h2><table class="matrix"><tr><th>指标</th><th>含义</th><th>用途</th></tr><tr><td>选品命中率</td><td>备货商品产生有效交易的比例</td><td>评价备什么是否准确</td></tr><tr><td>动销率</td><td>周期内有销量 SKU / 备货 SKU</td><td>评价铺货质量</td></tr><tr><td>现货率</td><td>有需求时门店/区域有可售库存比例</td><td>评价库存前置效果</td></tr><tr><td>缺货率</td><td>需求发生但无可售库存比例</td><td>评价少备和补货滞后</td></tr><tr><td>周转天数</td><td>平均库存 / 日均销售成本</td><td>评价库存效率</td></tr><tr><td>滞销率</td><td>超过周期未动销库存占比</td><td>触发调拨/清退</td></tr><tr><td>到货及时率</td><td>按承诺时间到货比例</td><td>评价供应商履约</td></tr><tr><td>售后率</td><td>售后件数 / 销售件数</td><td>评价商品和供应质量</td></tr></table></section>
+</template>
+<template id="tpl-organization.html">
+<section class="card"><h2>角色责任矩阵</h2><table class="matrix"><tr><th>角色</th><th>核心职责</th><th>关键输出</th></tr><tr><td>商品运营</td><td>品类策略、品牌品质选择、备货商品池维护、选品复核</td><td>商品池、区域选品池、门店铺货清单</td></tr><tr><td>供应链计划</td><td>需求预测、首铺量、补货点、安全库存、调拨清退建议</td><td>铺货计划、补货计划、库存参数</td></tr><tr><td>采购</td><td>供应商选择、主备供维护、采购执行、到货跟踪</td><td>采购单、供应商方案、异常处理</td></tr><tr><td>门店运营</td><td>门店铺货执行、收货入库、库存盘点、异常反馈</td><td>门店库存、执行反馈、滞销反馈</td></tr><tr><td>数据/经营分析</td><td>指标口径、分析看板、策略效果评估、复盘支持</td><td>评价报告、异常清单、策略建议</td></tr><tr><td>产品/技术</td><td>系统建设、流程线上化、数据集成、权限与规则配置</td><td>系统功能、接口、自动化能力</td></tr></table></section><div class="grid g3" style="margin-top:16px"><div class="card"><h2>日常运营机制</h2><ul><li>每周：补货建议审核</li><li>每周：缺货与滞销处理</li><li>每月：选品池更新</li><li>每月：供应商评分复盘</li><li>每季度：区域铺货策略调整</li></ul></div><div class="card"><h2>审核机制</h2><ul><li>新品进入备货池需商品运营审核</li><li>首铺计划需计划和门店运营确认</li><li>大额采购需采购/财务审批</li><li>战略品牌铺货需业务负责人确认</li><li>清退需商品与门店共同确认</li></ul></div><div class="card"><h2>异常机制</h2><ul><li>适配异常：商品运营处理</li><li>缺货异常：计划调整补货点</li><li>供应异常：采购切换备供</li><li>滞销异常：门店调拨/促销/清退</li><li>售后异常：冻结商品或供应商</li></ul></div></div><section class="card" style="margin-top:16px"><h2>RACI 简表</h2><table class="matrix"><tr><th>事项</th><th>负责 R</th><th>审批 A</th><th>协作 C</th><th>知会 I</th></tr><tr><td>备货商品池维护</td><td>商品运营</td><td>业务负责人</td><td>数据、采购、门店</td><td>计划、技术</td></tr><tr><td>补货计划生成</td><td>供应链计划</td><td>计划负责人</td><td>商品、门店、采购</td><td>业务负责人</td></tr><tr><td>供应商主备选择</td><td>采购</td><td>采购负责人</td><td>商品、计划、质控</td><td>门店</td></tr><tr><td>门店铺货执行</td><td>门店运营</td><td>区域负责人</td><td>仓、采购、计划</td><td>商品运营</td></tr><tr><td>评价复盘</td><td>数据/经营分析</td><td>业务负责人</td><td>商品、计划、采购、门店</td><td>技术</td></tr></table></section>
+</template>
+<template id="tpl-roadmap.html">
+<div class="grid g3"><div class="card"><h2>第一阶段：人工规则 + 流程闭环</h2><p><span class="tag">0-3个月</span><span class="tag">MVP</span></p><ul><li>商品池、区域选品池、门店清单</li><li>人工规则生成首铺/补货建议</li><li>供应商主备关系维护</li><li>门店库存台账与基础看板</li><li>评价指标初版</li></ul><p><strong>目标：</strong>先让业务可执行、可追踪、可复盘。</p></div><div class="card"><h2>第二阶段：半自动策略 + 系统协同</h2><p><span class="tag">3-6个月</span><span class="tag">效率提升</span></p><ul><li>选品推荐、补货建议自动生成</li><li>库存与交易平台联动</li><li>供应商评分和推荐</li><li>异常预警：缺货、滞销、售后</li><li>门店任务线上化</li></ul><p><strong>目标：</strong>系统给建议，人来审核，减少人工计算。</p></div><div class="card"><h2>第三阶段：智能决策 + 自动优化</h2><p><span class="tag">6-12个月</span><span class="tag">智能化</span></p><ul><li>智能选品、智能补货</li><li>智能调拨和清退</li><li>动态安全库存</li><li>供应商自动切换建议</li><li>策略参数自动迭代</li></ul><p><strong>目标：</strong>基于评价闭环持续自动优化。</p></div></div><section class="card" style="margin-top:16px"><h2>里程碑</h2><table class="matrix"><tr><th>里程碑</th><th>产物</th><th>验收标准</th></tr><tr><td>M1 业务闭环设计完成</td><td>业务流程、角色、指标、需求清单</td><td>业务、产品、技术、运营对齐</td></tr><tr><td>M2 MVP 上线</td><td>商品池、补货计划、供应商维护、门店库存</td><td>选定区域/门店可跑完整流程</td></tr><tr><td>M3 平台协同上线</td><td>库存回写、缺货反馈、订单履约协同</td><td>平台可消费门店/区域库存</td></tr><tr><td>M4 评价闭环上线</td><td>评价看板、异常预警、策略调整记录</td><td>按月复盘并更新策略参数</td></tr><tr><td>M5 智能推荐上线</td><td>选品/补货/供应商推荐模型</td><td>建议采纳率和业务指标提升</td></tr></table></section>
+</template>
+<template id="tpl-requirements.html">
+<section class="card"><h2>MVP 需求清单</h2><table class="matrix"><tr><th>模块</th><th>需求</th><th>优先级</th><th>说明</th></tr><tr><td>商品适配</td><td>车型/OE/SKU/品牌品质基础维护</td><td>P0</td><td>支撑选品与适配校验</td></tr><tr><td>商品适配</td><td>替代关系、套件关系维护</td><td>P1</td><td>支撑替代推荐和数量换算</td></tr><tr><td>选品策略</td><td>备货商品池维护</td><td>P0</td><td>可手工导入、编辑、审核</td></tr><tr><td>选品策略</td><td>区域选品池/门店铺货清单</td><td>P0</td><td>按区域、门店等级维护</td></tr><tr><td>补货计划</td><td>首铺量、安全库存、补货点配置</td><td>P0</td><td>先支持规则配置和人工调整</td></tr><tr><td>补货计划</td><td>补货建议生成和审核</td><td>P0</td><td>支持导出和下发任务</td></tr><tr><td>供应商</td><td>供应商档案、价格、交期维护</td><td>P0</td><td>支持主供/备供</td></tr><tr><td>采购</td><td>采购计划/采购单生成</td><td>P1</td><td>承接补货计划</td></tr><tr><td>库存</td><td>门店库存台账</td><td>P0</td><td>可售、在途、锁定、滞销</td></tr><tr><td>库存</td><td>调拨/清退任务</td><td>P1</td><td>处理库存结构问题</td></tr><tr><td>平台协同</td><td>库存回写交易平台</td><td>P1</td><td>支撑报价和履约</td></tr><tr><td>评价分析</td><td>选品、库存、供应商基础看板</td><td>P0</td><td>支持复盘闭环</td></tr><tr><td>评价分析</td><td>异常预警</td><td>P1</td><td>缺货、滞销、售后、供应异常</td></tr></table></section><div class="grid g3" style="margin-top:16px"><div class="card"><h2>P0：必须先做</h2><ul><li>商品/OE/车型/SKU 基础数据</li><li>备货商品池</li><li>区域/门店铺货清单</li><li>补货参数与计划</li><li>供应商主备关系</li><li>门店库存台账</li><li>基础评价看板</li></ul></div><div class="card"><h2>P1：提升效率</h2><ul><li>采购计划联动</li><li>库存回写交易平台</li><li>调拨/清退任务</li><li>供应商评分</li><li>异常预警</li><li>门店任务线上化</li></ul></div><div class="card"><h2>P2：智能优化</h2><ul><li>智能选品推荐</li><li>智能补货预测</li><li>动态安全库存</li><li>自动供应商推荐</li><li>策略参数自动迭代</li></ul></div></div>
+</template>
+<template id="tpl-discussion-notes.md"><section class="card"><h2>讨论沉淀</h2><p>该内容为 Markdown 文档，不再跳转页面。如需查看原文，可打开项目中的 <code>discussion-notes.md</code>。</p></section></template>
+</div>
+
+<script>
+(function(){
+  const overview = document.getElementById('overviewContent');
+  const detail = document.getElementById('detailContent');
+  const host = document.getElementById('contentHost');
+  const title = document.getElementById('viewerTitle');
+  const nav = document.getElementById('mainNav');
+  const back = document.getElementById('backOverview');
+
+  function setActive(view){
+    nav.querySelectorAll('[data-view]').forEach(a => a.classList.toggle('active', a.dataset.view === view));
+  }
+
+  function scrollTop(){ window.scrollTo({top:0, behavior:'smooth'}); }
+
+  function showOverview(push=true){
+    detail.classList.remove('active');
+    overview.classList.add('active');
+    host.innerHTML = '';
+    setActive('overview');
+    if (push) history.pushState({view:'overview'}, '', 'index.html');
+    scrollTop();
+  }
+
+  function showPage(view, pageTitle, push=true){
+    if (!view || view === 'overview' || view === 'index.html') return showOverview(push);
+    const tpl = document.getElementById('tpl-' + view);
+    if (!tpl) return showOverview(push);
+    title.textContent = pageTitle || '内容详情';
+    host.innerHTML = '';
+    host.appendChild(tpl.content.cloneNode(true));
+    overview.classList.remove('active');
+    detail.classList.add('active');
+    setActive(view);
+    if (push) history.pushState({view, title:pageTitle}, '', `index.html#${encodeURIComponent(view)}`);
+    scrollTop();
+  }
+
+  document.addEventListener('click', function(e){
+    const a = e.target.closest('a[data-view]');
+    if (!a) return;
+    e.preventDefault();
+    showPage(a.dataset.view, a.dataset.title || a.textContent.trim());
+  });
+
+  back.addEventListener('click', () => showOverview());
+  window.addEventListener('popstate', function(e){
+    const state = e.state;
+    if (state && state.view && state.view !== 'overview') showPage(state.view, state.title, false);
+    else showOverview(false);
+  });
+
+  const hashView = decodeURIComponent(location.hash.replace(/^#/, ''));
+  if (hashView) {
+    const link = nav.querySelector(`[data-view="${hashView}"]`);
+    showPage(hashView, link ? link.textContent.trim() : '内容详情', false);
+    history.replaceState({view:hashView, title:link ? link.textContent.trim() : '内容详情'}, '', `index.html#${encodeURIComponent(hashView)}`);
+  } else {
+    history.replaceState({view:'overview'}, '', 'index.html');
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Session 监控</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; padding: 24px; }
+h1 { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+.empty { color: #555; font-size: 13px; padding: 40px; text-align: center; }
+.session-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 16px; margin-bottom: 12px; transition: border-color 0.2s; }
+.session-card.running { border-color: #1a6cf5; }
+.session-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.running { background: #1a6cf5; animation: pulse 1s infinite; }
+.status-dot.idle { background: #555; }
+.session-id { font-size: 12px; color: #888; font-family: monospace; }
+.channel-badge { font-size: 11px; background: #222; border: 1px solid #333; border-radius: 4px; padding: 2px 6px; color: #aaa; }
+.session-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.stat { background: #111; border-radius: 6px; padding: 8px 10px; }
+.stat-label { font-size: 11px; color: #555; margin-bottom: 2px; }
+.stat-value { font-size: 13px; color: #e0e0e0; font-weight: 500; word-break: break-all; }
+.stat-value.highlight { color: #6aabff; }
+.stat-value.tool { color: #ffa726; }
+.phase-bar { margin-top: 10px; background: #111; border-radius: 6px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+.phase-label { font-size: 11px; color: #555; flex-shrink: 0; }
+.phase-value { font-size: 12px; color: #aaa; }
+.phase-value.thinking { color: #4caf50; }
+.phase-value.tool_executing { color: #ffa726; }
+.uptime { font-size: 11px; color: #555; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1><div class="dot"></div> Session 监控</h1>
+<div id="sessions"><div class="empty">连接中...</div></div>
+
+<script>
+let sessions = [];
+
+function elapsed(ts) {
+  if (!ts) return "";
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m ${s%60}s`;
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+}
+
+function render(data) {
+  sessions = data;
+  const el = document.getElementById("sessions");
+  if (!data.length) { el.innerHTML = '<div class="empty">暂无活跃 session</div>'; return; }
+
+  el.innerHTML = data.map(s => {
+    const isRunning = s.running;
+    const runTime = isRunning && s.startedAt ? elapsed(s.startedAt) : "";
+    return `
+      <div class="session-card ${isRunning ? "running" : ""}">
+        <div class="session-header">
+          <div class="status-dot ${isRunning ? "running" : "idle"}"></div>
+          <span class="session-id">${s.sessionId.slice(0, 16)}...</span>
+          <span class="channel-badge">${s.channel}</span>
+          ${isRunning ? `<span style="font-size:11px;color:#1a6cf5;margin-left:auto">运行中 ${runTime}</span>` : '<span style="font-size:11px;color:#555;margin-left:auto">空闲</span>'}
+        </div>
+        <div class="session-body">
+          <div class="stat">
+            <div class="stat-label">消息数</div>
+            <div class="stat-value">${s.messageCount}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">最后活动</div>
+            <div class="stat-value">${elapsed(s.lastActivity)} 前</div>
+          </div>
+          ${s.currentTool ? `<div class="stat">
+            <div class="stat-label">当前工具</div>
+            <div class="stat-value tool">${s.currentTool}</div>
+          </div>` : ""}
+        </div>
+        ${isRunning ? `<div class="phase-bar">
+          <span class="phase-label">阶段</span>
+          <span class="phase-value ${s.currentPhase ?? ""}">${phaseLabel(s.currentPhase)}</span>
+        </div>` : ""}
+        <div class="uptime">Session: ${s.sessionId}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function phaseLabel(phase) {
+  const map = {
+    thinking: "🤔 模型推理中",
+    tool_executing: "⚙️ 工具执行中",
+    provider_stream: "📡 等待模型响应",
+    save_tool_results: "💾 保存工具结果",
+    prepare_messages: "📋 准备消息",
+  };
+  return map[phase] ?? phase ?? "处理中";
+}
+
+// SSE for real-time updates
+const es = new EventSource("/api/sessions/stream");
+es.onmessage = (e) => render(JSON.parse(e.data));
+es.onerror = () => {
+  // Fallback to polling
+  setTimeout(() => fetch("/api/sessions").then(r => r.json()).then(render), 2000);
+};
+
+// Refresh elapsed times every second
+setInterval(() => { if (sessions.length) render(sessions); }, 1000);
+</script>
+</body>
+</html>

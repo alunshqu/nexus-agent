@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>汽车零配件门店备货业务架构：四个核心问题</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .hero-question {
+      background: linear-gradient(135deg, #7c3aed, #2563eb);
+      color: #fff;
+      border-radius: 24px;
+      padding: 26px;
+      box-shadow: var(--shadow);
+      margin-bottom: 18px;
+    }
+    .hero-question h2 { margin: 0 0 10px; font-size: 30px; }
+    .hero-question p { margin: 0; line-height: 1.8; opacity: .96; }
+    .question-grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .question-card { background:#fff; border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow); padding:18px; min-height: 220px; }
+    .question-card.primary { border:2px solid #7c3aed; background: linear-gradient(180deg,#fff,#faf5ff); }
+    .question-card h2 { margin:0 0 10px; font-size:22px; }
+    .question-card h3 { margin:0 0 8px; font-size:17px; }
+    .question-card p, .question-card li { color:var(--muted); line-height:1.7; font-size:14px; }
+    .question-card ul { margin:0; padding-left:20px; }
+    .num { display:inline-flex; width:30px; height:30px; border-radius:50%; align-items:center; justify-content:center; color:#fff; font-weight:800; margin-right:8px; background:#7c3aed; }
+    .num.blue { background:#2563eb; } .num.green{background:#059669;} .num.orange{background:#ea580c;} .num.yellow{background:#a16207;}
+    .decision-board { background:#fff; border:1px solid var(--line); border-radius:22px; box-shadow:var(--shadow); overflow:hidden; margin-bottom:20px; }
+    .decision-head { padding:18px 22px; background:linear-gradient(135deg,#4c1d95,#1d4ed8); color:#fff; }
+    .decision-head h2 { margin:0 0 6px; font-size:24px; }
+    .decision-head p { margin:0; opacity:.94; line-height:1.7; }
+    .decision-body { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:16px; padding:18px; }
+    .decision-col { border-radius:16px; border:1px solid #ddd6fe; background:#faf5ff; padding:16px; }
+    .decision-col h3 { margin:0 0 10px; font-size:18px; }
+    .decision-col ul { margin:0; padding-left:20px; color:var(--muted); line-height:1.7; font-size:14px; }
+    .focus-flow { display:grid; grid-template-columns: repeat(5, 1fr); gap:12px; }
+    .focus-step { background:#fff; border:1px solid #ddd6fe; border-radius:16px; padding:14px; min-height:130px; box-shadow:0 4px 12px rgba(15,23,42,.04); }
+    .focus-step strong { display:block; margin-bottom:8px; font-size:16px; }
+    .focus-step span { color:var(--muted); line-height:1.65; font-size:13px; }
+    @media(max-width:1200px){.question-grid{grid-template-columns:1fr 1fr}.decision-body{grid-template-columns:1fr}.focus-flow{grid-template-columns:1fr 1fr}}
+    @media(max-width:700px){.question-grid,.focus-flow{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="page">
+  <section class="top">
+    <h1>汽车零配件门店备货业务架构</h1>
+    <p>业务架构先回答四个问题：备什么、备多少、向谁备、怎么评价。其中「备什么」是第一性问题：先确定哪些商品值得进入备货池，再决定数量、供应商和评价闭环。</p>
+  </section>
+
+  <nav class="nav">
+    <a class="active" href="business-architecture-v2.html">业务架构</a>
+    <a href="roadmap.html">阶段路线</a>
+    <a href="process.html">核心流程</a>
+    <a href="application.html">应用架构</a>
+  </nav>
+
+  <section class="question-grid">
+    <div class="question-card primary">
+      <h2><span class="num">1</span>备什么？</h2>
+      <p><strong>核心问题：</strong>我要选哪些汽车零配件去备、去卖？</p>
+      <ul>
+        <li>选哪些品类、OE号、车型适配件</li>
+        <li>选哪些品牌、品质等级、价格带</li>
+        <li>是否纳入战略品牌/主推品牌</li>
+        <li>是否按套件、单件、左右件、前后件销售</li>
+        <li>是否适合城市店/下沉店前置备货</li>
+      </ul>
+    </div>
+
+    <div class="question-card">
+      <h2><span class="num blue">2</span>备多少？</h2>
+      <p><strong>核心问题：</strong>每个商品在每个区域/门店应该备多少数量？</p>
+      <ul>
+        <li>历史交易与销量预测</li>
+        <li>询价、缺货、流失需求</li>
+        <li>车型保有量与车龄结构</li>
+        <li>单车用量、套件/单件换算</li>
+        <li>安全库存、补货点、补货量</li>
+      </ul>
+    </div>
+
+    <div class="question-card">
+      <h2><span class="num green">3</span>向谁备？</h2>
+      <p><strong>核心问题：</strong>这些货向哪些供应商买、由谁供、谁更合适？</p>
+      <ul>
+        <li>供应商准入与分层</li>
+        <li>品牌合作与战略推广</li>
+        <li>价格、供货稳定性、交期</li>
+        <li>售后承担能力</li>
+        <li>区域供应能力与服务能力</li>
+      </ul>
+    </div>
+
+    <div class="question-card">
+      <h2><span class="num yellow">4</span>怎么评价？</h2>
+      <p><strong>核心问题：</strong>备得好不好、卖得好不好、供应商选得对不对？</p>
+      <ul>
+        <li>选品命中率、动销率</li>
+        <li>缺货率、现货率、库存周转</li>
+        <li>毛利、售后率、错配率</li>
+        <li>供应商履约与质量表现</li>
+        <li>流程效率与策略迭代</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="hero-question">
+    <h2>重点突出：备什么 = 通用商品选择能力</h2>
+    <p>
+      「备什么」不是简单挑 SKU，而是一个通用的商品选择决策能力。它综合平台交易数据、人工线下经验、城市消费等级、区域车型保有量、品类属性、品牌合作、供应稳定性、售后表现、适配关系、套件/单件和单车用量，最终决定某个区域/门店应该经营哪些配件，以及这些配件应该使用什么品牌、什么品质、什么价格带。
+    </p>
+  </section>
+
+  <section class="decision-board">
+    <div class="decision-head">
+      <h2>「备什么」的业务决策结构</h2>
+      <p>把商品选择拆成输入、策略和输出三层，业务上更容易讲清楚，也方便后续承接到流程和应用架构。</p>
+    </div>
+    <div class="decision-body">
+      <div class="decision-col">
+        <h3>一、决策输入</h3>
+        <ul>
+          <li>平台历史交易、询价、报价、订单数据</li>
+          <li>缺货、未成交、流失需求</li>
+          <li>人工线下经验：供应商、门店、维修厂反馈</li>
+          <li>城市消费等级、区域车型保有量、车龄结构</li>
+          <li>商品适配数据：车型、OE号、VIN、替代关系</li>
+          <li>供应商品牌合作、战略品牌、价格政策</li>
+          <li>售后质量数据：错配、退货、质量问题</li>
+        </ul>
+      </div>
+      <div class="decision-col">
+        <h3>二、选择策略</h3>
+        <ul>
+          <li>品类选择策略：哪些品类适合前置备货</li>
+          <li>OE/号段策略：哪些号段匹配哪些品牌</li>
+          <li>品牌选择策略：品牌优先级、战略品牌推广</li>
+          <li>品质选择策略：经济型、标准型、高品质、原厂品质</li>
+          <li>城市消费等级策略：不同区域匹配不同品质和价格带</li>
+          <li>套件/单件/单车用量规则</li>
+          <li>人工经验校正与例外规则</li>
+        </ul>
+      </div>
+      <div class="decision-col">
+        <h3>三、决策输出</h3>
+        <ul>
+          <li>备货商品池</li>
+          <li>区域选品池</li>
+          <li>城市店铺货商品清单</li>
+          <li>下沉店铺货商品清单</li>
+          <li>品牌/品质/价格带组合</li>
+          <li>替代商品和不建议备货清单</li>
+          <li>需要人工复核的商品清单</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>「备什么」的五步决策流程</h2>
+    <div class="focus-flow">
+      <div class="focus-step"><strong>1. 需求识别</strong><span>从平台交易、询价、缺货、人工经验、区域车型中发现哪些配件有需求。</span></div>
+      <div class="focus-step"><strong>2. 适配校验</strong><span>通过车型、OE号、VIN、替代关系，确保商品选得对，不产生错配。</span></div>
+      <div class="focus-step"><strong>3. 品类筛选</strong><span>判断哪些品类适合备货，哪些只适合平台询价或供应商直发。</span></div>
+      <div class="focus-step"><strong>4. 品牌/品质选择</strong><span>结合城市消费等级、车型价值、供应商品牌合作、价格带和售后风险，决定品牌与品质。</span></div>
+      <div class="focus-step"><strong>5. 输出备货池</strong><span>形成区域选品池、门店铺货清单、品牌品质组合和人工复核清单。</span></div>
+    </div>
+  </section>
+
+  <br />
+  <section class="grid g3">
+    <div class="card">
+      <h2>备多少：数量决策承接</h2>
+      <p>在「备什么」确定后，再进入数量问题。数量不是简单按销量拍脑袋，而是结合历史交易、销量预测、车型保有量、单车用量、销售单位、库存单位、安全库存和补货周期计算。</p>
+    </div>
+    <div class="card">
+      <h2>向谁备：供应商选择承接</h2>
+      <p>确定商品和数量后，需要判断向哪些供应商采购或调货。这里要建立供应商评价体系，包括价格、品牌、交期、供货稳定性、质量、售后承担和区域服务能力。</p>
+    </div>
+    <div class="card">
+      <h2>怎么评价：闭环承接</h2>
+      <p>最终用评价体系贯穿前三个问题：选品是否命中、数量是否合理、供应商是否合适、流程是否顺畅，并将结果反向修正规则和策略。</p>
+    </div>
+  </section>
+
+  <div class="note">
+    当前版本先突出「备什么」。后续可以继续分别展开「备多少」「向谁备」「怎么评价」三块，并把它们映射到阶段路线、流程和应用架构。
+  </div>
+</div>
+</body>
+</html>
