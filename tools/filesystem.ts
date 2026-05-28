@@ -90,14 +90,31 @@ export const filesystemTools: Anthropic.Tool[] = [
 ];
 
 const DEFAULT_READ_LIMIT = Number(process.env.READ_FILE_DEFAULT_LIMIT ?? 500);
+const MAX_RAW_READ_BYTES = Number(process.env.READ_FILE_MAX_RAW_BYTES ?? 2 * 1024 * 1024);
+const MAX_SEARCH_FILE_BYTES = Number(process.env.SEARCH_MAX_FILE_BYTES ?? 2 * 1024 * 1024);
 
 export async function toolReadFile(state: SessionState, input: Record<string, unknown>) {
   const filePath = resolvePath(state, expectString(input.path, "path"));
-  const text = await fs.readFile(filePath, "utf8");
-  if (input.raw === true) return truncate(text);
-  const lines = text.split(/\r?\n/);
+  const stat = await fs.stat(filePath);
+
+  if (input.raw === true) {
+    if (stat.size > MAX_RAW_READ_BYTES) {
+      const handle = await fs.open(filePath, "r");
+      try {
+        const buffer = Buffer.alloc(MAX_RAW_READ_BYTES);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        return truncate(buffer.subarray(0, bytesRead).toString("utf8") + `\n... file truncated at ${MAX_RAW_READ_BYTES} bytes of ${stat.size}`);
+      } finally {
+        await handle.close().catch(() => undefined);
+      }
+    }
+    return truncate(await fs.readFile(filePath, "utf8"));
+  }
+
   const offset = Math.max(1, Math.floor(Number(input.offset ?? 1)));
   const limit = input.limit == null ? DEFAULT_READ_LIMIT : Math.max(1, Math.floor(Number(input.limit)));
+  const text = await fs.readFile(filePath, "utf8");
+  const lines = text.split(/\r?\n/);
   const selected = lines.slice(offset - 1, offset - 1 + limit);
   const rendered = selected.map((line, i) => `${offset + i}\t${line}`).join("\n");
   const remaining = lines.length - (offset - 1 + limit);
@@ -162,9 +179,12 @@ export async function toolGrep(state: SessionState, input: Record<string, unknow
   const maxResults = clampNumber(input.max_results, 200, 1, 5000);
   const results: Array<{ file: string; line: number; text: string }> = [];
   const root = (await fs.stat(searchPath)).isDirectory() ? searchPath : path.dirname(searchPath);
+  let skippedLargeFiles = 0;
 
-  const visit = async (filePath: string) => {
+  const visit = async (filePath: string, stat?: Awaited<ReturnType<typeof fs.stat>>) => {
     if (results.length >= maxResults) return;
+    const fileStat = stat ?? await fs.stat(filePath).catch(() => undefined);
+    if (fileStat && fileStat.size > MAX_SEARCH_FILE_BYTES) { skippedLargeFiles++; return; }
     const rel = normalizeSlashes(path.relative(root, filePath));
     if (include && !include.test(rel)) return;
     if (await looksBinary(filePath)) return;
@@ -178,9 +198,9 @@ export async function toolGrep(state: SessionState, input: Record<string, unknow
 
   const stat = await fs.stat(searchPath);
   if (stat.isDirectory()) {
-    await walk(searchPath, async (fp, cs) => { if (cs.isFile()) await visit(fp); });
+    await walk(searchPath, async (fp, cs) => { if (cs.isFile()) await visit(fp, cs); }, { maxFileSizeBytes: MAX_SEARCH_FILE_BYTES });
   } else {
-    await visit(searchPath);
+    await visit(searchPath, stat);
   }
-  return truncate(JSON.stringify({ path: searchPath, pattern: input.pattern, count: results.length, results }, null, 2));
+  return truncate(JSON.stringify({ path: searchPath, pattern: input.pattern, count: results.length, skippedLargeFiles, results }, null, 2));
 }

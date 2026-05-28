@@ -4,7 +4,7 @@ import os from "os";
 import { mkdirSync } from "fs";
 
 export type TraceEvent =
-  | { type: "llm_call"; iteration: number; model: string; systemPrompt: string; messages: any[]; ts: number }
+  | { type: "llm_call"; iteration: number; model: string; systemPrompt: string; messages: unknown[]; ts: number }
   | { type: "llm_response"; iteration: number; stopReason: string; content: any[]; usage?: any; ts: number }
   | { type: "tool_call"; name: string; input: unknown; ts: number }
   | { type: "tool_result"; name: string; result: string; is_error: boolean; durationMs: number; ts: number }

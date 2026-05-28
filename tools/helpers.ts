@@ -23,7 +23,15 @@ export function globToRegExp(pattern: string) {
   return new RegExp(out + "$");
 }
 
-export async function walk(root: string, onFile: (fullPath: string, stat: Awaited<ReturnType<typeof fs.stat>>) => Promise<void> | void) {
+export type WalkOptions = {
+  maxFileSizeBytes?: number;
+};
+
+export async function walk(
+  root: string,
+  onFile: (fullPath: string, stat: Awaited<ReturnType<typeof fs.stat>>) => Promise<void> | void,
+  options: WalkOptions = {}
+) {
   const ignored = new Set([".git", "node_modules", ".DS_Store", "dist", "build", "coverage"]);
   const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
@@ -31,14 +39,21 @@ export async function walk(root: string, onFile: (fullPath: string, stat: Awaite
     const fullPath = path.join(root, entry.name);
     const stat = await fs.stat(fullPath).catch(() => undefined);
     if (!stat) continue;
-    if (stat.isDirectory()) await walk(fullPath, onFile);
-    else await onFile(fullPath, stat);
+    if (stat.isDirectory()) await walk(fullPath, onFile, options);
+    else if (!options.maxFileSizeBytes || stat.size <= options.maxFileSizeBytes) await onFile(fullPath, stat);
   }
 }
 
 export async function looksBinary(filePath: string) {
-  const buffer = await fs.readFile(filePath).catch(() => Buffer.alloc(0));
-  return buffer.subarray(0, 4096).includes(0);
+  const handle = await fs.open(filePath, "r").catch(() => undefined);
+  if (!handle) return false;
+  try {
+    const buffer = Buffer.alloc(4096);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).includes(0);
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 export function normalizeSlashes(v: string) { return v.split(path.sep).join("/"); }

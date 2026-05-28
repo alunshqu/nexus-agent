@@ -190,9 +190,10 @@ function applyObservationMasking(messages: Anthropic.MessageParam[], keepLast: n
   }
 
   if (indices.length === 0) return messages;
+  const indexSet = new Set(indices);
 
   return messages.map((msg, i) => {
-    if (!indices.includes(i)) return msg;
+    if (!indexSet.has(i)) return msg;
     // Mask tool_result content but keep the structure (tool_use_id must remain for API validity)
     const content = (msg.content as any[]).map((b: any) => {
       if (b.type === "tool_result") {

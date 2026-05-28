@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   truncate, keepTail, clampNumber, expectString, asRecord,
   globToRegExp, decodeDuckDuckGoUrl, stripHtml, decodeHtml,
-  countOccurrences,
+  countOccurrences, looksBinary,
 } from "../tools/helpers.js";
 
 describe("truncate", () => {
@@ -197,5 +197,25 @@ describe("allowedTools wildcard matching", () => {
 
   it("* alone matches everything", () => {
     expect(filterTools(["bash", "web_search"], ["*"])).toEqual(["bash", "web_search"]);
+  });
+});
+
+
+describe("looksBinary", () => {
+  it("detects NUL bytes from the file head without reading the whole file", async () => {
+    const { mkdtemp, writeFile, rm } = await import("fs/promises");
+    const { tmpdir } = await import("os");
+    const { join } = await import("path");
+    const dir = await mkdtemp(join(tmpdir(), "agent-helper-test-"));
+    try {
+      const textFile = join(dir, "text.txt");
+      const binFile = join(dir, "bin.dat");
+      await writeFile(textFile, "hello world", "utf8");
+      await writeFile(binFile, Buffer.from([65, 0, 66]));
+      expect(await looksBinary(textFile)).toBe(false);
+      expect(await looksBinary(binFile)).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
