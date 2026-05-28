@@ -11,6 +11,7 @@ import type { Provider, TokenUsage } from "../infra/provider.js";
 import { startTrace, finalizeTrace, addErrorEvent, type Trace } from "../infra/trace.js";
 import { createLogger, serializeError, truncateValue } from "../infra/logger.js";
 import { memoryTools, executeMemoryTool, retrieveForSystem, retrieveForMessages, extractMemories } from "../memory/index.js";
+import { shouldColdStartCompress, coldStartCompressMessages } from "./cold-start.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -75,6 +76,16 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
 
     phase = "prepare_messages";
     fireHook("before_message", { SESSION_ID: state.id, MESSAGE: userMessage });
+    if (shouldColdStartCompress(state.lastActivityAt) && state.messages.length > 0) {
+      const cold = coldStartCompressMessages(state.messages);
+      if (cold.compressed) {
+        state.messages = cold.messages;
+        rewriteSessionMessages(state.id, state.messages);
+        state.lastInputTokens = undefined;
+        inc("context.cold_start_compressions");
+        logger.info("context_cold_start_compressed", { sessionId: state.id, beforeLastActivityAt: state.lastActivityAt, messageCount: state.messages.length });
+      }
+    }
     const prepareStart = Date.now();
     const prepareResult = await prepareMessages(state.messages, state.lastInputTokens);
     timing("context.prepare_ms", Date.now() - prepareStart);
@@ -170,6 +181,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       trace.events.push({ type: "llm_response", iteration, stopReason, content, usage, ts: Date.now() });
 
       if (stopReason === "end_turn") {
+        state.lastActivityAt = Date.now();
         phase = "finalize_done";
         updateSessionStatus(state.id, { running: false, currentTool: undefined, currentPhase: undefined, messageCount: state.messages.length });
         trace.endTs = Date.now();
@@ -267,6 +279,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
     phase = "finalize_loop";
     trace.endTs = Date.now();
     if (!state.running) {
+      state.lastActivityAt = Date.now();
       trace.events.push({ type: "done", totalMs: trace.endTs - trace.startTs, totalUsage, ts: Date.now() });
       safeFinalizeTrace(trace, { sessionId: state.id, phase, iteration });
       onEvent({ type: "done", traceId: trace.id, usage: totalUsage });

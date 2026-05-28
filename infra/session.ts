@@ -82,6 +82,7 @@ export type SessionState = {
   channel?: ChannelCapabilities;
   lastInputTokens?: number;
   channelId?: string;  // channel-specific user/chat identifier (e.g. wecom userid)
+  lastActivityAt?: number; // timestamp of previous completed user turn; used for prompt-cache cold-start decisions
 };
 
 const DB_PATH = path.join(os.homedir(), ".agent", "sessions.db");
@@ -97,6 +98,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     cwd TEXT NOT NULL,
+    channel_id TEXT,
+    last_activity_at INTEGER,
     updated_at INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS messages (
@@ -107,11 +110,12 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
 `);
-// Add channel_id column if it doesn't exist (migration for existing DBs)
+// Add columns if they don't exist (migration for existing DBs)
 try { db.exec("ALTER TABLE sessions ADD COLUMN channel_id TEXT"); } catch { /* already exists */ }
+try { db.exec("ALTER TABLE sessions ADD COLUMN last_activity_at INTEGER"); } catch { /* already exists */ }
 
 const upsertSession = db.prepare(
-  "INSERT INTO sessions (id, cwd, channel_id, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET cwd=excluded.cwd, channel_id=excluded.channel_id, updated_at=excluded.updated_at"
+  "INSERT INTO sessions (id, cwd, channel_id, last_activity_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET cwd=excluded.cwd, channel_id=excluded.channel_id, last_activity_at=excluded.last_activity_at, updated_at=excluded.updated_at"
 );
 const insertMessage = db.prepare(
   "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)"
@@ -131,7 +135,7 @@ export function createSession(id?: string): SessionState {
 }
 
 export function saveSession(state: SessionState) {
-  upsertSession.run(state.id, state.cwd, state.channelId ?? null, Date.now());
+  upsertSession.run(state.id, state.cwd, state.channelId ?? null, state.lastActivityAt ?? null, Date.now());
 }
 
 export function saveMessage(sessionId: string, role: string, content: unknown) {
@@ -152,7 +156,7 @@ export function loadSession(id: string): SessionState | null {
     logger.warn("loaded_session_repaired", { sessionId: id, before, after: messages.length });
     rewriteMessages(id, messages);
   }
-  return { id, cwd: row.cwd, running: false, messages, activeChildren: new Set(), channelId: row.channel_id ?? undefined };
+  return { id, cwd: row.cwd, running: false, messages, activeChildren: new Set(), channelId: row.channel_id ?? undefined, lastActivityAt: row.last_activity_at ?? undefined };
 }
 
 export function prepareForNewUserMessage(state: SessionState) {

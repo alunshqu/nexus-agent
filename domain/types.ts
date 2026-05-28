@@ -19,6 +19,7 @@ export type SessionState = {
   channel?: ChannelCapabilities;
   lastInputTokens?: number;
   channelId?: string;  // channel-specific user/chat identifier (e.g. wecom userid)
+  lastActivityAt?: number; // timestamp of previous completed user turn; used for prompt-cache cold-start decisions
 };
 
 export type AgentEvent =
