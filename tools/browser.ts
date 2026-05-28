@@ -5,6 +5,7 @@ import path from "path";
 import os from "os";
 import type { SessionState } from "../domain/types.js";
 import { createLogger } from "../infra/logger.js";
+import { timing } from "../infra/metrics.js";
 
 const SCREENSHOT_DIR = path.join(os.homedir(), ".agent", "screenshots");
 
@@ -55,7 +56,9 @@ async function ensureChrome() {
 
 async function withPage<T>(tabId: string | undefined, fn: (client: any) => Promise<T>): Promise<T> {
   const cdp = await getCDP();
+  const connectStart = Date.now();
   const client = await cdp({ port: CDP_PORT, target: tabId });
+  timing("browser.cdp_connect_ms", Date.now() - connectStart);
   try {
     await client.Page.enable();
     await client.Runtime.enable();
@@ -256,10 +259,24 @@ export async function executeBrowserTool(
           await client.Runtime.evaluate({
             expression: `document.querySelector(${JSON.stringify(input.selector)})?.focus()`,
           });
-          for (const char of String(input.text)) {
-            await client.Input.dispatchKeyEvent({ type: "keyDown", text: char });
-            await client.Input.dispatchKeyEvent({ type: "keyUp", text: char });
-          }
+          const text = String(input.text);
+          await client.Runtime.evaluate({
+            expression: `(() => {
+              const el = document.querySelector(${JSON.stringify(input.selector)});
+              if (!el) throw new Error("Element not found: ${input.selector}");
+              const value = ${JSON.stringify(text)};
+              if (typeof el.value === 'string') {
+                el.value = (el.value || '') + value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              } else {
+                el.textContent = (el.textContent || '') + value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+              return true;
+            })()`,
+            returnByValue: true,
+          });
           return { content: `Typed "${input.text}" into ${input.selector}` };
         });
       }

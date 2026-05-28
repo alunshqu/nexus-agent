@@ -5,7 +5,7 @@ import { getMcpTools, callMcpTool, mcpToolMap } from "../infra/mcp.js";
 import { prepareMessages } from "./context.js";
 import { saveMessage, repairSessionMessages, updateSessionStatus, rewriteSessionMessages } from "../infra/session.js";
 import { fireHook } from "../infra/hooks.js";
-import { inc } from "../infra/metrics.js";
+import { inc, timing } from "../infra/metrics.js";
 import type { SessionState } from "./types.js";
 import type { Provider, TokenUsage } from "../infra/provider.js";
 import { startTrace, finalizeTrace, addErrorEvent, type Trace } from "../infra/trace.js";
@@ -75,7 +75,9 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
 
     phase = "prepare_messages";
     fireHook("before_message", { SESSION_ID: state.id, MESSAGE: userMessage });
+    const prepareStart = Date.now();
     const prepareResult = await prepareMessages(state.messages, state.lastInputTokens);
+    timing("context.prepare_ms", Date.now() - prepareStart);
     loopMessages = prepareResult.messages;
     if (prepareResult.persistBack) {
       state.messages = prepareResult.messages;
@@ -129,6 +131,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
 
       phase = "provider_stream";
       updateSessionStatus(state.id, { running: true, currentPhase: "thinking", currentTool: undefined, startedAt: trace.startTs });
+      const streamStart = Date.now();
       const { stopReason, content, usage, abort } = await provider.stream({
         systemPrompt,
         systemSuffix: memorySuffix || undefined,
@@ -136,6 +139,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
         tools: allTools,
         onText: (delta) => onEvent({ type: "text", delta }),
       });
+      timing("provider.stream_ms", Date.now() - streamStart);
 
       phase = "post_stream_running_check";
       if (!state.running) break;
@@ -232,6 +236,8 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
         }
         inc("tool.calls");
         const durationMs = Date.now() - t0;
+        timing(`tool.${toolUse.name}.ms`, durationMs);
+        timing("tool.total_ms", durationMs);
 
         phase = "tool_result";
         const truncated = result.content.length > 4000 ? result.content.slice(0, 4000) + "\n...[truncated]" : result.content;

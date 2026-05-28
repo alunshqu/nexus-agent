@@ -118,11 +118,11 @@ const invalidateMemory = db.prepare(`
 const deleteMemory = db.prepare(`DELETE FROM memories WHERE id = ?`);
 
 const selectActiveMemories = db.prepare(`
-  SELECT * FROM memories WHERE valid_until IS NULL ORDER BY updated_at DESC
+  SELECT * FROM memories WHERE valid_until IS NULL ORDER BY updated_at DESC LIMIT ?
 `);
 
 const selectMemoriesByType = db.prepare(`
-  SELECT * FROM memories WHERE type = ? AND valid_until IS NULL ORDER BY updated_at DESC
+  SELECT * FROM memories WHERE type = ? AND valid_until IS NULL ORDER BY updated_at DESC LIMIT ?
 `);
 
 const searchMemoriesFTS = db.prepare(`
@@ -174,12 +174,14 @@ export function getMemoryById(id: string): Memory | null {
   return row ? rowToMemory(row) : null;
 }
 
-export function getActiveMemories(): Memory[] {
-  return (selectActiveMemories.all() as any[]).map(rowToMemory);
+const DEFAULT_MEMORY_LIMIT = Number(process.env.MEMORY_LIST_LIMIT ?? 1000);
+
+export function getActiveMemories(limit = DEFAULT_MEMORY_LIMIT): Memory[] {
+  return (selectActiveMemories.all(limit) as any[]).map(rowToMemory);
 }
 
-export function getMemoriesByType(type: Memory["type"]): Memory[] {
-  return (selectMemoriesByType.all(type) as any[]).map(rowToMemory);
+export function getMemoriesByType(type: Memory["type"], limit = DEFAULT_MEMORY_LIMIT): Memory[] {
+  return (selectMemoriesByType.all(type, limit) as any[]).map(rowToMemory);
 }
 
 export function searchMemories(query: string, limit = 20): Memory[] {
@@ -209,11 +211,12 @@ export async function findSimilarMemories(content: string, threshold = 0.3, limi
     return results;
   } catch (error) {
     logger.warn("vector_search_failed", { error: error instanceof Error ? error.message : String(error), threshold, limit });
-    // Fallback to keyword matching if vector search fails
+    // Fallback to keyword matching if vector search fails. Keep this bounded so a
+    // broken vector index cannot degrade into a full memory-table scan.
     const queryWords = new Set(extractKeywords(content));
     if (queryWords.size === 0) return [];
-    const all = getActiveMemories();
-    return all.filter(m => {
+    const candidates = getActiveMemories(Math.max(limit * 20, 100));
+    return candidates.filter(m => {
       const memWords = new Set(extractKeywords(m.content));
       const intersection = [...queryWords].filter(w => memWords.has(w)).length;
       const union = new Set([...queryWords, ...memWords]).size;
