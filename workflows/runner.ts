@@ -1,6 +1,6 @@
 import type { AgentTeamWorkflow } from "./agent-team.js";
 
-export type WorkflowPhaseStatus = "pending" | "running" | "completed" | "failed";
+export type WorkflowPhaseStatus = "pending" | "running" | "completed" | "failed" | "waiting_approval";
 
 export type WorkflowRunPhase = {
   name: string;
@@ -61,6 +61,8 @@ export function advanceWorkflowRun(
     ? "failed"
     : phases.every(p => p.status === "completed")
     ? "completed"
+    : phases.some(p => p.status === "waiting_approval")
+    ? "waiting_approval"
     : phases.some(p => p.status === "running" || p.status === "completed")
     ? "running"
     : "pending";

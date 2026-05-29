@@ -9,8 +9,9 @@ import { listCrons, addCron, deleteCron, updateCron } from "./infra/cron.js";
 import { buildAgentTeamWorkflow, type BuiltInWorkflowKind } from "./workflows/agent-team.js";
 import { createWorkflowStore } from "./workflows/store.js";
 import { runWorkflow } from "./workflows/runtime.js";
-import { createBrainstormPhaseOutput, generateBrainstormReport } from "./workflows/brainstorm-report.js";
 import { getWorkflowTemplate, listWorkflowTemplates } from "./workflows/templates.js";
+import { createTaskWorkflowExecutor, finalizeWorkflowArtifacts, formatWorkflowProgress } from "./workflows/executors.js";
+import { selectWorkflowForTask } from "./workflows/selector.js";
 
 type CommandHandler = (args: string, state: SessionState, opts: Omit<AgentOptions, "onEvent">) => Promise<string> | string;
 
@@ -233,7 +234,7 @@ System Prompt：（子 agent 的角色和规则）
   },
 
   workflow: {
-    description: "管理 workflow（/workflow list | start <research|code|kb> <目标> | template <模板ID> <目标> | templates | show <id> | run <id>）",
+    description: "管理任务导向 workflow（auto/start/template/run/progress/artifacts/pause/approve）",
     handler: async (args) => {
       const [sub, ...rest] = args.trim().split(/\s+/);
       const store = createWorkflowStore();
@@ -242,7 +243,7 @@ System Prompt：（子 agent 的角色和规则）
         const runs = store.listRuns(20);
         if (runs.length === 0) return "暂无 workflow run。";
         return runs.map(r => {
-          const current = r.phases.find(p => p.status === "running") ?? r.phases.find(p => p.status === "pending");
+          const current = r.phases.find(p => p.status === "running" || p.status === "waiting_approval") ?? r.phases.find(p => p.status === "pending");
           const template = r.workflow.templateId ? ` template=${r.workflow.templateId}` : "";
           return `${statusIcon(r.status)} [${r.id.slice(0, 8)}] ${r.workflow.kind}${template} ${r.status}\n   目标: ${r.workflow.objective}\n   当前: ${current ? `${current.name}/${current.status}` : "—"}\n   更新: ${new Date(r.updatedAt).toLocaleString()}`;
         }).join("\n\n");
@@ -255,6 +256,24 @@ System Prompt：（子 agent 的角色和规则）
           ...templates.map(t => `- ${t.id}：${t.name} — ${t.description}`),
           "\n使用：/workflow template <模板ID> <目标>",
         ].join("\n");
+      }
+
+      if (sub === "auto") {
+        const objective = rest.join(" ").trim();
+        if (!objective) return "用法：/workflow auto <用户目标>";
+        const selection = selectWorkflowForTask(objective);
+        if (selection.mode === "direct") {
+          return `这个请求更适合直接处理，不需要 workflow。\n原因：${selection.reason}\n置信度：${selection.confidence}`;
+        }
+        const workflow = selection.templateId
+          ? getWorkflowTemplate(selection.templateId)?.build(objective)
+          : selection.kind
+          ? buildAgentTeamWorkflow(selection.kind, objective)
+          : undefined;
+        if (!workflow) return `无法创建 workflow：未找到匹配模板或类型。${JSON.stringify(selection)}`;
+        const run = store.createRun(workflow);
+        store.appendEvent(run.id, "run_created", { source: "slash_command_auto", selection });
+        return `✅ 已自动选择 workflow：${run.id}\n选择：${selection.templateId ?? selection.kind}\n原因：${selection.reason}\n目标：${objective}\n阶段：${run.phases.map(p => p.name).join(" → ")}\n\n执行：/workflow run ${run.id.slice(0, 8)}`;
       }
 
       if (sub === "template") {
@@ -279,11 +298,12 @@ System Prompt：（子 agent 的角色和规则）
         return `✅ Workflow 已创建：${run.id}\n类型：${kind}\n目标：${objective}\n阶段：${run.phases.map(p => p.name).join(" → ")}\n\n执行：/workflow run ${run.id.slice(0, 8)}`;
       }
 
-      if (sub === "show") {
+      if (sub === "show" || sub === "progress") {
         const id = rest[0];
-        if (!id) return "用法：/workflow show <id>";
+        if (!id) return `用法：/workflow ${sub} <id>`;
         const run = findWorkflowRun(store, id);
         if (!run) return `未找到 workflow：${id}`;
+        if (sub === "progress") return formatWorkflowProgress(run);
         const events = store.listEvents(run.id).slice(-10);
         const artifacts = store.listArtifacts(run.id);
         return [
@@ -299,6 +319,58 @@ System Prompt：（子 agent 的角色和规则）
         ].join("\n");
       }
 
+      if (sub === "artifacts") {
+        const id = rest[0];
+        if (!id) return "用法：/workflow artifacts <id>";
+        const run = findWorkflowRun(store, id);
+        if (!run) return `未找到 workflow：${id}`;
+        const artifacts = store.listArtifacts(run.id);
+        if (!artifacts.length) return "暂无 artifacts。";
+        return artifacts.map(a => `- [${a.id.slice(0, 8)}] ${a.phaseName}/${a.name} (${a.contentType}, ${a.content.length} chars)`).join("\n");
+      }
+
+      if (sub === "artifact") {
+        const id = rest[0];
+        const artifactKey = rest[1];
+        if (!id || !artifactKey) return "用法：/workflow artifact <workflow-id> <artifact-id|name>";
+        const run = findWorkflowRun(store, id);
+        if (!run) return `未找到 workflow：${id}`;
+        const artifact = store.listArtifacts(run.id).find(a => a.id.startsWith(artifactKey) || a.name === artifactKey);
+        if (!artifact) return `未找到 artifact：${artifactKey}`;
+        return `# ${artifact.name}\n\n${artifact.content}`;
+      }
+
+      if (sub === "pause") {
+        const id = rest[0];
+        const phaseName = rest[1];
+        const reason = rest.slice(2).join(" ") || "等待用户确认";
+        if (!id) return "用法：/workflow pause <id> [phase] [reason]";
+        const run = findWorkflowRun(store, id);
+        if (!run) return `未找到 workflow：${id}`;
+        const target = phaseName ? run.phases.find(p => p.name === phaseName) : run.phases.find(p => p.status === "pending" || p.status === "running");
+        if (!target) return "没有可暂停的阶段。";
+        const { advanceWorkflowRun } = await import("./workflows/runner.js");
+        const updated = advanceWorkflowRun(run, target.name, { status: "waiting_approval", error: reason });
+        store.saveRun(updated);
+        store.appendEvent(updated.id, "workflow_paused", { phase: target.name, reason });
+        return `⏸ Workflow 已暂停：${updated.id}\n阶段：${target.name}\n原因：${reason}\n继续：/workflow approve ${updated.id.slice(0, 8)} ${target.name}`;
+      }
+
+      if (sub === "approve") {
+        const id = rest[0];
+        const phaseName = rest[1];
+        if (!id) return "用法：/workflow approve <id> [phase]";
+        const run = findWorkflowRun(store, id);
+        if (!run) return `未找到 workflow：${id}`;
+        const target = phaseName ? run.phases.find(p => p.name === phaseName) : run.phases.find(p => p.status === "waiting_approval");
+        if (!target || target.status !== "waiting_approval") return "没有等待确认的阶段。";
+        const { advanceWorkflowRun } = await import("./workflows/runner.js");
+        const updated = advanceWorkflowRun(run, target.name, { status: "pending", error: undefined });
+        store.saveRun(updated);
+        store.appendEvent(updated.id, "workflow_approved", { phase: target.name });
+        return `✅ 已批准继续：${updated.id}\n阶段：${target.name}\n执行：/workflow run ${updated.id.slice(0, 8)}`;
+      }
+
       if (sub === "run") {
         const id = rest[0];
         if (!id) return "用法：/workflow run <id>";
@@ -307,25 +379,18 @@ System Prompt：（子 agent 的角色和规则）
         const result = await runWorkflow({
           store,
           runId: run.id,
-          executor: async ({ run, phase, previousOutputs }) => {
-            const output = run.workflow.templateId === "brainstorm-council"
-              ? createBrainstormPhaseOutput(run.workflow, phase.name, previousOutputs)
-              : `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`;
-            return {
-              output,
-              artifacts: [{ name: `${phase.name}.md`, contentType: "text/markdown", content: output }],
-            };
-          },
+          executor: createTaskWorkflowExecutor(store),
         });
-        if (result.workflow.templateId === "brainstorm-council") {
-          const report = generateBrainstormReport(result);
-          store.saveArtifact(result.id, "roadmap", "final-report.md", "text/markdown", report.markdown);
-          return `✅ Workflow 模板任务执行结束：${result.id}\n模板：${result.workflow.templateId}\n状态：${result.status}\n\n${report.markdown}`;
-        }
-        return `✅ Workflow 执行结束：${result.id}\n状态：${result.status}\n阶段：${result.phases.map(p => `${p.name}=${p.status}`).join(", ")}`;
+        finalizeWorkflowArtifacts(store, result);
+        const artifacts = store.listArtifacts(result.id);
+        const finalReport = artifacts.find(a => a.name === "final-report.md");
+        const summary = formatWorkflowProgress(result);
+        return finalReport
+          ? `✅ Workflow 执行结束：${result.id}\n状态：${result.status}\n\n${finalReport.content}`
+          : `✅ Workflow 执行结束：${result.id}\n\n${summary}`;
       }
 
-      return "/workflow list — 列出 workflow\n/workflow templates — 列出任务模板\n/workflow start <research|code|kb> <目标> — 创建内置 workflow\n/workflow template <模板ID> <目标> — 创建一次性模板任务\n/workflow show <id> — 查看详情\n/workflow run <id> — 执行到结束";
+      return "/workflow list — 列出 workflow\n/workflow auto <目标> — 自动选择 workflow/template\n/workflow templates — 列出任务模板\n/workflow start <research|code|kb> <目标> — 创建内置 workflow\n/workflow template <模板ID> <目标> — 创建一次性模板任务\n/workflow run <id> — 执行\n/workflow progress <id> — 查看进度\n/workflow artifacts <id> — 列出产物\n/workflow pause/approve <id> — 暂停/批准";
     },
   },
 };

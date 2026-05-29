@@ -39,7 +39,30 @@ export const brainstormCouncilTemplate: WorkflowTemplate = {
   },
 };
 
-export const workflowTemplates: WorkflowTemplate[] = [brainstormCouncilTemplate];
+export const generalTaskTemplate: WorkflowTemplate = {
+  id: "general-task",
+  name: "通用复杂任务",
+  description: "当用户目标较复杂但不属于 research/code/kb 时，用于跟踪理解、执行和交付",
+  build(objective: string): AgentTeamWorkflow {
+    return {
+      kind: "task",
+      templateId: "general-task",
+      objective,
+      roles: [
+        { name: "planner", responsibility: "理解目标并明确交付物" },
+        { name: "executor", responsibility: "推进任务并记录过程" },
+        { name: "reviewer", responsibility: "整理交付结果、风险和下一步" },
+      ],
+      phases: [
+        { name: "understand", owner: "planner", output: "目标理解和验收标准" },
+        { name: "execute", owner: "executor", output: "执行记录和中间结果" },
+        { name: "deliver", owner: "reviewer", output: "最终交付、风险和下一步" },
+      ],
+    };
+  },
+};
+
+export const workflowTemplates: WorkflowTemplate[] = [brainstormCouncilTemplate, generalTaskTemplate];
 
 export function getWorkflowTemplate(id: string): WorkflowTemplate | undefined {
   return workflowTemplates.find(t => t.id === id);
