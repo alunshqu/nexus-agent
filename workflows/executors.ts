@@ -17,8 +17,23 @@ type ResearchTools = {
   fetch: (input: Record<string, unknown>) => Promise<string>;
 };
 
+type ResearchBudget = {
+  maxSearchResults: number;
+  maxFetches: number;
+  maxCharsPerPage: number;
+  minUsableSources: number;
+};
+
+const DEFAULT_RESEARCH_BUDGET: ResearchBudget = {
+  maxSearchResults: Number(process.env.WORKFLOW_RESEARCH_MAX_RESULTS ?? 6),
+  maxFetches: Number(process.env.WORKFLOW_RESEARCH_MAX_FETCHES ?? 4),
+  maxCharsPerPage: Number(process.env.WORKFLOW_RESEARCH_MAX_CHARS_PER_PAGE ?? 1200),
+  minUsableSources: Number(process.env.WORKFLOW_RESEARCH_MIN_USABLE_SOURCES ?? 2),
+};
+
 type TaskWorkflowExecutorOptions = {
   researchTools?: ResearchTools;
+  researchBudget?: Partial<ResearchBudget>;
   codeTools?: CodeTools;
 };
 
@@ -28,6 +43,7 @@ type CodeTools = {
 
 export function createTaskWorkflowExecutor(store: WorkflowStore, options: TaskWorkflowExecutorOptions = {}): RegisteredWorkflowExecutor {
   const researchTools = options.researchTools ?? { search: toolWebSearch, fetch: toolWebFetch };
+  const researchBudget = { ...DEFAULT_RESEARCH_BUDGET, ...(options.researchBudget ?? {}) };
   const codeTools = options.codeTools ?? { exec: runCommand };
   return async function taskWorkflowExecutor(context: WorkflowExecutorContext): Promise<WorkflowExecutorResult> {
     const { run, phase, previousOutputs } = context;
@@ -48,7 +64,7 @@ export function createTaskWorkflowExecutor(store: WorkflowStore, options: TaskWo
     }
 
     if (run.workflow.kind === "research") {
-      return executeResearchPhase(run.workflow.objective, phase.name, previousOutputs, researchTools);
+      return executeResearchPhase(run.workflow.objective, phase.name, previousOutputs, researchTools, researchBudget);
     }
 
     if (run.workflow.kind === "code") {
@@ -96,12 +112,13 @@ function phaseOutput(prefix: string, phaseName: string, output: string): Workflo
   return { output, artifacts: [{ name: `${phaseName}.md`, contentType: "text/markdown", content: output }] };
 }
 
-async function executeResearchPhase(objective: string, phaseName: string, previous: Record<string, string>, tools: ResearchTools): Promise<WorkflowExecutorResult> {
+async function executeResearchPhase(objective: string, phaseName: string, previous: Record<string, string>, tools: ResearchTools, budget: ResearchBudget): Promise<WorkflowExecutorResult> {
   switch (phaseName) {
     case "collect": {
-      const searchRaw = await tools.search({ query: objective, max_results: 6 });
+      const cleanedObjective = cleanResearchObjective(objective);
+      const searchRaw = await tools.search({ query: cleanedObjective, max_results: budget.maxSearchResults });
       const parsed = parseJsonObject(searchRaw);
-      const results = Array.isArray(parsed.results) ? parsed.results.slice(0, 4) : [];
+      const results = Array.isArray(parsed.results) ? filterSearchResults(parsed.results).slice(0, budget.maxFetches) : [];
       const fetched: Array<{ title?: string; url?: string; status?: number; excerpt?: string; error?: string }> = [];
       for (const result of results) {
         const url = typeof result?.url === "string" ? result.url : undefined;
@@ -113,17 +130,21 @@ async function executeResearchPhase(objective: string, phaseName: string, previo
             title: typeof result.title === "string" ? result.title : undefined,
             url,
             status: typeof fetchedJson.status === "number" ? fetchedJson.status : undefined,
-            excerpt: typeof fetchedJson.body === "string" ? fetchedJson.body.slice(0, 1200) : undefined,
+            excerpt: typeof fetchedJson.body === "string" ? fetchedJson.body.slice(0, budget.maxCharsPerPage) : undefined,
           });
         } catch (error) {
           fetched.push({ title: result.title, url, error: error instanceof Error ? error.message : String(error) });
         }
       }
+      const usableSources = fetched.filter(f => !f.error && (f.status === 200 || f.status === undefined) && (f.excerpt?.trim().length ?? 0) >= 200);
       const output = [
         "# 候选来源与关键事实",
         "",
-        `目标：${objective}`,
+        `目标：${cleanedObjective}`,
+        `原始输入：${objective.slice(0, 500)}`,
         `查询时间：${new Date().toISOString()}`,
+        `预算：maxResults=${budget.maxSearchResults}, maxFetches=${budget.maxFetches}, maxCharsPerPage=${budget.maxCharsPerPage}`,
+        `可用来源：${usableSources.length}/${fetched.length}`,
         "",
         "## 搜索结果",
         formatSearchResults(results),
@@ -131,7 +152,7 @@ async function executeResearchPhase(objective: string, phaseName: string, previo
         "## 抓取摘录",
         fetched.map((f, i) => [`### ${i + 1}. ${f.title ?? f.url}`, `URL：${f.url ?? "未知"}`, f.error ? `抓取失败：${f.error}` : `状态：${f.status ?? "未知"}\n\n${f.excerpt ?? "无正文摘录"}`].join("\n")).join("\n\n") || "无可抓取来源。",
       ].join("\n");
-      return { output, artifacts: [
+      return { output, quality: { passed: usableSources.length >= budget.minUsableSources, reason: usableSources.length >= budget.minUsableSources ? undefined : `usable sources ${usableSources.length} below minimum ${budget.minUsableSources}`, score: usableSources.length }, artifacts: [
         { name: "collect.md", contentType: "text/markdown", content: output },
         { name: "sources.json", contentType: "application/json", content: JSON.stringify({ objective, search: parsed, fetched }, null, 2) },
       ] };
@@ -487,6 +508,26 @@ function estimateKbRisk(pair: QaPair): { level: "low" | "medium" | "high"; reaso
 
 function inferKbScope(pair: QaPair): string {
   return `适用于“${inferTopic(pair.question)}”相关的标准问答场景；不适用于个案承诺或高风险专业建议。`;
+}
+
+function cleanResearchObjective(input: string): string {
+  const normalized = input
+    .replace(/(来吧|嗯|那个|真实的考验|迎接一下|帮我|请你|麻烦你)/g, " ")
+    .replace(/(.{2,30}?)(?:\s*\1){2,}/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized.slice(0, 240) || input.slice(0, 240);
+}
+
+function filterSearchResults(results: any[]): any[] {
+  const seen = new Set<string>();
+  return results.filter(r => {
+    const url = typeof r?.url === "string" ? r.url : "";
+    if (!url || seen.has(url)) return false;
+    seen.add(url);
+    if (/zhihu\.com|mitrade\.com|pinterest|facebook|x\.com|twitter\.com/i.test(url)) return false;
+    return true;
+  });
 }
 
 function parseJsonObject(raw: string): any {

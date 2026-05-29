@@ -32,7 +32,7 @@ describe("task-oriented workflow executor", () => {
               { title: "LangGraph Overview", url: "https://example.com/langgraph", snippet: "agent workflows need state and durable execution" },
             ],
           }),
-          fetch: async ({ url }) => JSON.stringify({ url, status: 200, body: `Official content for ${url}: workflows orchestrate steps; agents decide actions dynamically.` }),
+          fetch: async ({ url }) => JSON.stringify({ url, status: 200, body: `Official content for ${url}: workflows orchestrate steps; agents decide actions dynamically. `.repeat(20) }),
         },
       }),
     });
@@ -42,6 +42,32 @@ describe("task-oriented workflow executor", () => {
     expect(result.phases.map(p => p.status)).toEqual(["completed", "completed", "completed"]);
     expect(store.listArtifacts(result.id).map(a => a.name)).toContain("workflow-summary.md");
     expect(formatWorkflowProgress(result)).toContain("调研 agent workflow 趋势");
+  });
+
+  it("fails research workflow when quality gate has too few usable sources", async () => {
+    const store = createWorkflowStore(path.join(dir, "workflow.db"));
+    const result = await runWorkflow({
+      store,
+      workflow: buildAgentTeamWorkflow("research", "调研黄金 6 到 9 月趋势"),
+      executor: createTaskWorkflowExecutor(store, {
+        researchBudget: { minUsableSources: 2, maxFetches: 2 },
+        researchTools: {
+          search: async () => JSON.stringify({
+            provider: "fake",
+            results: [
+              { title: "Blocked source", url: "https://example.com/blocked", snippet: "short" },
+              { title: "Empty source", url: "https://example.com/empty", snippet: "short" },
+            ],
+          }),
+          fetch: async ({ url }) => JSON.stringify({ url, status: 403, body: "blocked" }),
+        },
+      }),
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.phases[0].status).toBe("failed");
+    const events = store.listEvents(result.id);
+    expect(events.some(e => e.type === "phase_failed")).toBe(true);
   });
 
   it("runs brainstorm template and emits final report", async () => {

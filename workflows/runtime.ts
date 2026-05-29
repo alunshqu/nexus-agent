@@ -15,6 +15,7 @@ export type WorkflowArtifactInput = {
 export type WorkflowExecutorResult = {
   output: string;
   artifacts?: WorkflowArtifactInput[];
+  quality?: { passed: boolean; reason?: string; score?: number };
 };
 
 export type WorkflowExecutorContext = {
@@ -113,6 +114,10 @@ async function runPhase(args: {
       for (const artifact of result.artifacts ?? []) {
         validateArtifact(artifact);
         store.saveArtifact(run.id, args.phase.name, artifact.name, artifact.contentType, artifact.content);
+      }
+
+      if (result.quality && !result.quality.passed) {
+        throw new Error(`workflow quality gate failed: ${result.quality.reason ?? "unknown reason"}`);
       }
 
       run = advanceWorkflowRun(run, args.phase.name, { status: "completed", output: result.output });
