@@ -8,6 +8,51 @@ const logger = createLogger("provider");
 
 const MAX_RETRIES = Number(process.env.PROVIDER_MAX_RETRIES ?? 3);
 const RETRY_BASE_MS = Number(process.env.PROVIDER_RETRY_BASE_MS ?? 1000);
+const RETRY_MAX_DELAY_MS = Number(process.env.PROVIDER_RETRY_MAX_DELAY_MS ?? 30_000);
+
+// Decide whether an error is worth retrying. Structured fields (status / type) take
+// precedence; message-substring matching is a last-resort fallback for proxies that only
+// surface the reason in text. Retries cover: rate limits, transient upstream/network
+// blips, and ALL 5xx (the proxy/upstream channel is sometimes flaky and recovers).
+export function isRetryableError(error: any): boolean {
+  // HTTP status: 429 (rate limit) + any 5xx (502/503/504 from the proxy or upstream).
+  const status: number | undefined = error?.status ?? error?.statusCode;
+  if (typeof status === "number" && (status === 429 || status >= 500)) return true;
+
+  // Anthropic SDK structured error types.
+  const type: string | undefined = error?.type ?? error?.error?.type;
+  if (type === "rate_limit_error" || type === "overloaded_error" ||
+      type === "api_error" || type === "upstream_error") return true;
+
+  // Transient network errors (no HTTP response at all).
+  const code: string | undefined = error?.code ?? error?.cause?.code;
+  if (code && ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"].includes(code)) return true;
+
+  // Last-resort message matching (proxy text without structured fields).
+  const msg: string = error?.message ?? "";
+  return /rate limit|Upstream request failed|Concurrency limit|overloaded|timeout|temporarily unavailable|503|502|504/i.test(msg);
+}
+
+// Parse an HTTP Retry-After header: either delta-seconds or an HTTP-date. Returns ms, or
+// undefined if unparseable. Negative/past values clamp to 0.
+export function parseRetryAfter(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const secs = Number(value);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const date = Date.parse(value);
+  if (Number.isFinite(date)) return Math.max(0, date - Date.now());
+  return undefined;
+}
+
+// Exponential backoff with full jitter, honoring Retry-After when the server provides it.
+// jitter avoids the thundering-herd problem when many concurrent requests are throttled
+// together and would otherwise all wake at the same instant and re-collide.
+export function computeRetryDelay(attempt: number, retryAfterMs?: number): number {
+  const exp = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_MS * Math.pow(2, attempt));
+  const jittered = Math.random() * exp; // full jitter: uniform in [0, exp]
+  // If the server told us how long to wait, never wait less than that.
+  return retryAfterMs !== undefined ? Math.max(retryAfterMs, jittered) : jittered;
+}
 
 async function withRetry<T>(fn: () => Promise<T>, context: Record<string, unknown>): Promise<T> {
   let lastError: unknown;
@@ -16,12 +61,9 @@ async function withRetry<T>(fn: () => Promise<T>, context: Record<string, unknow
       return await fn();
     } catch (error: any) {
       lastError = error;
-      const isRetryable = error?.type === "rate_limit_error" || error?.type === "upstream_error" ||
-        error?.message?.includes("rate limit") || error?.message?.includes("Upstream request failed") ||
-        error?.message?.includes("Concurrency limit");
-      if (!isRetryable || attempt === MAX_RETRIES) { inc("provider.errors"); throw error; }
-      const delay = RETRY_BASE_MS * Math.pow(2, attempt);
-      logger.warn("provider_retry", { attempt: attempt + 1, maxRetries: MAX_RETRIES, delayMs: delay, error: error?.message, ...context });
+      if (!isRetryableError(error) || attempt === MAX_RETRIES) { inc("provider.errors"); throw error; }
+      const delay = Math.round(computeRetryDelay(attempt, error?.retryAfterMs));
+      logger.warn("provider_retry", { attempt: attempt + 1, maxRetries: MAX_RETRIES, delayMs: delay, status: error?.status, type: error?.type, code: error?.code, error: error?.message, ...context });
       await new Promise(r => setTimeout(r, delay));
     }
   }
@@ -212,7 +254,12 @@ export function createOpenAIProvider(config: ProviderConfig): Provider {
 
         if (!res.ok) {
           const errText = await res.text();
-          throw new Error(`Responses API error ${res.status}: ${errText}`);
+          const err = new Error(`Responses API error ${res.status}: ${errText}`) as any;
+          // Structured fields so withRetry can decide without parsing the message string.
+          err.status = res.status;
+          const retryAfter = res.headers.get("retry-after");
+          if (retryAfter) err.retryAfterMs = parseRetryAfter(retryAfter);
+          throw err;
         }
 
         const content: Anthropic.ContentBlock[] = [];
