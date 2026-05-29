@@ -24,10 +24,12 @@ export function shouldAutoHandleWorkflow(userMessage: string, selection: Workflo
   if (selection.mode !== "workflow") return false;
   if (selection.confidence < Number(process.env.WORKFLOW_AUTO_CONFIDENCE ?? 0.72)) return false;
 
-  // Guardrail: only auto-run workflow paths that have real executors. Research is now
-  // backed by web_search/web_fetch. Code/kb are still kept out of main-loop auto mode
-  // until their executors perform real file/KB operations rather than scaffolding.
-  return selection.kind === "research" || selection.templateId === "brainstorm-council" || selection.templateId === "general-task";
+  // Guardrail: only auto-run workflow paths that have real task completion semantics.
+  // Research is backed by web_search/web_fetch; kb performs deterministic cleaning,
+  // clustering, risk scoring and candidate generation. Code workflow can verify and
+  // audit real diffs, but it cannot independently author patches, so keep code in the
+  // normal agent loop where file-edit tools are available.
+  return selection.kind === "research" || selection.kind === "kb" || selection.templateId === "brainstorm-council" || selection.templateId === "general-task";
 }
 
 export async function maybeHandleAutoWorkflow(

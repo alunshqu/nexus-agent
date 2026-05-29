@@ -55,6 +55,61 @@ describe("task-oriented workflow executor", () => {
     expect(final?.content).toContain("LifeOS");
   });
 
+  it("runs code workflow with real repository verification hooks via injected commands", async () => {
+    const store = createWorkflowStore(path.join(dir, "workflow.db"));
+    const calls: string[] = [];
+    const result = await runWorkflow({
+      store,
+      workflow: buildAgentTeamWorkflow("code", "验证当前代码变更"),
+      executor: createTaskWorkflowExecutor(store, {
+        codeTools: {
+          exec: async (cmd, args) => {
+            const command = [cmd, ...args].join(" ");
+            calls.push(command);
+            if (command === "git status --short") return { stdout: " M workflows/executors.ts\n", stderr: "", exitCode: 0 };
+            if (command === "git diff --stat") return { stdout: " workflows/executors.ts | 10 +++++\n", stderr: "", exitCode: 0 };
+            if (command === "git diff --name-only") return { stdout: "workflows/executors.ts\n", stderr: "", exitCode: 0 };
+            if (command === "git diff --") return { stdout: "diff --git a/workflows/executors.ts b/workflows/executors.ts\n", stderr: "", exitCode: 0 };
+            if (command === "npm run typecheck") return { stdout: "typecheck ok", stderr: "", exitCode: 0 };
+            if (command === "npm test") return { stdout: "tests ok", stderr: "", exitCode: 0 };
+            return { stdout: "", stderr: "", exitCode: 0 };
+          },
+        },
+      }),
+    });
+    finalizeWorkflowArtifacts(store, result);
+
+    expect(result.status).toBe("completed");
+    expect(calls).toContain("git diff --name-only");
+    expect(calls).toContain("npm run typecheck");
+    expect(calls).toContain("npm test");
+    const final = store.listArtifacts(result.id).find(a => a.name === "final-report.md");
+    expect(final?.content).toContain("验证命令全部通过");
+  });
+
+  it("runs kb workflow and emits candidate knowledge entries", async () => {
+    const store = createWorkflowStore(path.join(dir, "workflow.db"));
+    const objective = [
+      "Q: 怎么退款？",
+      "A: 订单发货前可以在订单页申请退款，发货后请联系客服处理。",
+      "Q: 忘记密码怎么办？",
+      "A: 可以在登录页点击忘记密码，通过手机号或邮箱重置。",
+    ].join("\n");
+    const result = await runWorkflow({
+      store,
+      workflow: buildAgentTeamWorkflow("kb", objective),
+      executor: createTaskWorkflowExecutor(store),
+    });
+    finalizeWorkflowArtifacts(store, result);
+
+    expect(result.status).toBe("completed");
+    const artifacts = store.listArtifacts(result.id);
+    expect(artifacts.map(a => a.name)).toContain("kb-candidates.json");
+    const final = artifacts.find(a => a.name === "final-report.md");
+    expect(final?.content).toContain("候选知识库条目");
+    expect(final?.content).toContain("怎么退款");
+  });
+
   it("supports waiting approval status and resuming to pending", () => {
     const run = buildWorkflowRun(buildAgentTeamWorkflow("code", "修改高风险配置"));
     const paused = advanceWorkflowRun(run, "plan", { status: "waiting_approval", error: "需要确认" });
