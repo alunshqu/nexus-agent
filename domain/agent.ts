@@ -15,6 +15,7 @@ import { shouldColdStartCompress, coldStartCompressMessages } from "./cold-start
 import { stableTools, buildActiveTools } from "../tools/tool-assembly.js";
 import { toolCallSignature } from "../tools/tool-dedupe.js";
 import { selectPrinciplesForTask, createEmptyPrincipleEvidence, recordToolEvidence, recordToolResultEvidence, evaluatePrinciples, maybeIngestUserCorrection, type ActivePrinciple, type PrincipleEvidence } from "../principles/index.js";
+import { maybeHandleAutoWorkflow, emptyWorkflowUsage } from "./workflow-auto.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -99,6 +100,24 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
     });
     const feedback = maybeIngestUserCorrection(userMessage, state.id);
     if (feedback.saved) trace.events.push({ type: "feedback_ingested", pendingPath: feedback.pendingPath, ts: Date.now() });
+
+    phase = "auto_workflow_select";
+    const autoWorkflow = await maybeHandleAutoWorkflow(state, userMessage, (delta) => onEvent({ type: "text", delta }));
+    if (autoWorkflow.selection) {
+      trace.events.push({ type: "workflow_auto_selection", selection: autoWorkflow.selection, handled: autoWorkflow.handled, ts: Date.now() });
+    }
+    if (autoWorkflow.handled) {
+      const assistantText = autoWorkflow.text ?? "";
+      principleEvidence.finalResponse = assistantText;
+      const principleEvaluations = evaluatePrinciples(activePrinciples, principleEvidence);
+      trace.events.push({ type: "principle_eval", evaluations: principleEvaluations, ts: Date.now() });
+      trace.endTs = Date.now();
+      trace.events.push({ type: "done", totalMs: trace.endTs - trace.startTs, totalUsage: emptyWorkflowUsage(), ts: Date.now() });
+      safeFinalizeTrace(trace, { sessionId: state.id, phase, iteration });
+      onEvent({ type: "done", traceId: trace.id, usage: emptyWorkflowUsage() });
+      fireHook("on_done", { SESSION_ID: state.id, RESPONSE_TEXT: assistantText, USAGE: JSON.stringify(emptyWorkflowUsage()) });
+      return;
+    }
 
     phase = "prepare_messages";
     fireHook("before_message", { SESSION_ID: state.id, MESSAGE: userMessage });

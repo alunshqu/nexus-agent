@@ -11,6 +11,7 @@ export type TraceEvent =
   | { type: "principles_activated"; principles: Array<{ id: string; title: string; level: string; score: number; matchedTriggers: string[] }>; ts: number }
   | { type: "principle_eval"; evaluations: Array<{ principleId: string; passed: boolean; score: number; evidence: Record<string, unknown>; missing: string[] }>; ts: number }
   | { type: "feedback_ingested"; pendingPath?: string; ts: number }
+  | { type: "workflow_auto_selection"; selection: unknown; handled: boolean; ts: number }
   | { type: "done"; totalMs: number; totalUsage: any; ts: number }
   | { type: "error"; message: string; phase?: string; details?: unknown; stack?: string; ts: number };
 
