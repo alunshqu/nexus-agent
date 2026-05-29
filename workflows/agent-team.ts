@@ -4,7 +4,7 @@ export type AgentTeamWorkflow = {
   kind: AgentTeamKind;
   objective: string;
   roles: Array<{ name: string; responsibility: string }>;
-  phases: Array<{ name: string; owner: string; output: string }>;
+  phases: Array<{ name: string; owner: string; output: string; timeoutMs?: number; maxAttempts?: number }>;
 };
 
 export function buildAgentTeamWorkflow(kind: AgentTeamKind, objective: string): AgentTeamWorkflow {

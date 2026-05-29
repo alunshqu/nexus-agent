@@ -15,6 +15,9 @@ import { listCrons, getCron, addCron, updateCron, deleteCron } from "../infra/cr
 import { reloadHooks } from "../infra/hooks.js";
 import { getMetrics, gauge } from "../infra/metrics.js";
 import { summarizeCacheUsage } from "../infra/cache-usage.js";
+import { buildAgentTeamWorkflow, type AgentTeamKind } from "../workflows/agent-team.js";
+import { createWorkflowStore } from "../workflows/store.js";
+import { runWorkflow } from "../workflows/runtime.js";
 
 const logger = createLogger("api");
 
@@ -412,6 +415,72 @@ export async function handleApiRequest(
     return true;
   }
 
+  // ── Workflows ─────────────────────────────────────────────────────────────────
+
+  if (url === "/api/workflows" && req.method === "GET") {
+    const store = createWorkflowStore();
+    const parsed = new URL(url, "http://localhost");
+    const limit = Math.min(Math.max(Number(parsed.searchParams.get("limit") ?? 50), 1), 500);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(store.listRuns(limit)));
+    return true;
+  }
+
+  if (url === "/api/workflows" && req.method === "POST") {
+    let bodyStr = "";
+    for await (const chunk of req) bodyStr += chunk;
+    try {
+      const body = JSON.parse(bodyStr || "{}");
+      const kind = body.kind as AgentTeamKind;
+      if (kind !== "research" && kind !== "code" && kind !== "kb") throw new Error("kind must be research, code or kb");
+      if (!body.objective || typeof body.objective !== "string") throw new Error("objective required");
+      const store = createWorkflowStore();
+      const run = store.createRun(buildAgentTeamWorkflow(kind, body.objective));
+      store.appendEvent(run.id, "run_created", { source: "api" });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, run }));
+    } catch (e) {
+      logger.error("workflow_create_failed", e);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+    }
+    return true;
+  }
+
+  if (url.startsWith("/api/workflows/") && url.endsWith("/run") && req.method === "POST") {
+    const id = decodeURIComponent(url.slice("/api/workflows/".length, -"/run".length));
+    try {
+      const store = createWorkflowStore();
+      const run = findApiWorkflowRun(store, id);
+      if (!run) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "workflow not found" })); return true; }
+      const result = await runWorkflow({
+        store,
+        runId: run.id,
+        executor: async ({ phase }) => ({
+          output: `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`,
+          artifacts: [{ name: `${phase.name}.txt`, contentType: "text/plain", content: `owner=${phase.owner}\noutput=${phase.outputName}` }],
+        }),
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, run: result }));
+    } catch (e) {
+      logger.error("workflow_run_failed", e, { id });
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+    }
+    return true;
+  }
+
+  if (url.startsWith("/api/workflows/") && req.method === "GET") {
+    const id = decodeURIComponent(url.slice("/api/workflows/".length));
+    const store = createWorkflowStore();
+    const run = findApiWorkflowRun(store, id);
+    if (!run) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "workflow not found" })); return true; }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ run, events: store.listEvents(run.id), artifacts: store.listArtifacts(run.id) }));
+    return true;
+  }
+
   // ── Hooks ─────────────────────────────────────────────────────────────────────
 
   if (url === "/api/hooks/reload" && req.method === "POST") {
@@ -430,6 +499,10 @@ export async function handleApiRequest(
   }
 
   return false;
+}
+
+function findApiWorkflowRun(store: ReturnType<typeof createWorkflowStore>, idOrPrefix: string) {
+  return store.getRun(idOrPrefix) ?? store.listRuns(500).find(r => r.id.startsWith(idOrPrefix));
 }
 
 function gitUrlToRaw(gitUrl: string): string {

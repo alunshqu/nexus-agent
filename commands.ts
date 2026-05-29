@@ -6,6 +6,9 @@ import { getTraces } from "./infra/trace.js";
 import { rewriteSessionMessages } from "./infra/session.js";
 import { agentTemplates } from "./agents/index.js";
 import { listCrons, addCron, deleteCron, updateCron } from "./infra/cron.js";
+import { buildAgentTeamWorkflow, type AgentTeamKind } from "./workflows/agent-team.js";
+import { createWorkflowStore } from "./workflows/store.js";
+import { runWorkflow } from "./workflows/runtime.js";
 
 type CommandHandler = (args: string, state: SessionState, opts: Omit<AgentOptions, "onEvent">) => Promise<string> | string;
 
@@ -226,7 +229,83 @@ System Prompt：（子 agent 的角色和规则）
       return "/cron list — 列出所有任务\n/cron add \"<cron>\" <名称> -- <任务> — 新建任务\n/cron del <id|名称> — 删除任务\n/cron enable/disable <id|名称> — 启用/暂停";
     },
   },
+
+  workflow: {
+    description: "管理生产级 workflow（/workflow list | start <research|code|kb> <目标> | show <id> | run <id>）",
+    handler: async (args) => {
+      const [sub, ...rest] = args.trim().split(/\s+/);
+      const store = createWorkflowStore();
+
+      if (!sub || sub === "list") {
+        const runs = store.listRuns(20);
+        if (runs.length === 0) return "暂无 workflow run。";
+        return runs.map(r => {
+          const current = r.phases.find(p => p.status === "running") ?? r.phases.find(p => p.status === "pending");
+          return `${statusIcon(r.status)} [${r.id.slice(0, 8)}] ${r.workflow.kind} ${r.status}\n   目标: ${r.workflow.objective}\n   当前: ${current ? `${current.name}/${current.status}` : "—"}\n   更新: ${new Date(r.updatedAt).toLocaleString()}`;
+        }).join("\n\n");
+      }
+
+      if (sub === "start") {
+        const kind = rest.shift() as AgentTeamKind | undefined;
+        const objective = rest.join(" ").trim();
+        if (kind !== "research" && kind !== "code" && kind !== "kb") return "用法：/workflow start <research|code|kb> <目标>";
+        if (!objective) return "请提供 workflow 目标。";
+        const run = store.createRun(buildAgentTeamWorkflow(kind, objective));
+        store.appendEvent(run.id, "run_created", { source: "slash_command" });
+        return `✅ Workflow 已创建：${run.id}\n类型：${kind}\n目标：${objective}\n阶段：${run.phases.map(p => p.name).join(" → ")}\n\n执行：/workflow run ${run.id.slice(0, 8)}`;
+      }
+
+      if (sub === "show") {
+        const id = rest[0];
+        if (!id) return "用法：/workflow show <id>";
+        const run = findWorkflowRun(store, id);
+        if (!run) return `未找到 workflow：${id}`;
+        const events = store.listEvents(run.id).slice(-10);
+        const artifacts = store.listArtifacts(run.id);
+        return [
+          `Workflow: ${run.id}`,
+          `类型：${run.workflow.kind}`,
+          `状态：${run.status}`,
+          `目标：${run.workflow.objective}`,
+          "阶段：",
+          ...run.phases.map(p => `- ${p.name} / ${p.owner}: ${p.status}${p.error ? ` — ${p.error}` : ""}${p.output ? `\n  输出：${p.output.slice(0, 200)}` : ""}`),
+          `Artifacts：${artifacts.length}`,
+          "最近事件：",
+          ...(events.length ? events.map(e => `- ${new Date(e.createdAt).toLocaleTimeString()} ${e.type}`) : ["- 无"]),
+        ].join("\n");
+      }
+
+      if (sub === "run") {
+        const id = rest[0];
+        if (!id) return "用法：/workflow run <id>";
+        const run = findWorkflowRun(store, id);
+        if (!run) return `未找到 workflow：${id}`;
+        const result = await runWorkflow({
+          store,
+          runId: run.id,
+          executor: async ({ phase }) => ({
+            output: `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`,
+            artifacts: [{ name: `${phase.name}.txt`, contentType: "text/plain", content: `owner=${phase.owner}\noutput=${phase.outputName}` }],
+          }),
+        });
+        return `✅ Workflow 执行结束：${result.id}\n状态：${result.status}\n阶段：${result.phases.map(p => `${p.name}=${p.status}`).join(", ")}`;
+      }
+
+      return "/workflow list — 列出 workflow\n/workflow start <research|code|kb> <目标> — 创建 workflow\n/workflow show <id> — 查看详情\n/workflow run <id> — 执行到结束";
+    },
+  },
 };
+
+function statusIcon(status: string): string {
+  if (status === "completed") return "✅";
+  if (status === "failed") return "❌";
+  if (status === "running") return "🔄";
+  return "⏳";
+}
+
+function findWorkflowRun(store: ReturnType<typeof createWorkflowStore>, idOrPrefix: string) {
+  return store.getRun(idOrPrefix) ?? store.listRuns(500).find(r => r.id.startsWith(idOrPrefix));
+}
 
 export async function handleSlashCommand(
   input: string,
