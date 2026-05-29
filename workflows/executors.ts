@@ -372,6 +372,8 @@ type ResearchSignal = {
   drivers: string[];
   risks: string[];
   sourceCount: number;
+  sourceViews: string[];
+  confidence: "高" | "中" | "低";
 };
 
 function buildResearchFinalReport(objective: string, collect: string): string {
@@ -387,9 +389,18 @@ function buildResearchFinalReport(objective: string, collect: string): string {
     "",
     "## 结论先行",
     conclusion,
+    `置信度：${signal.confidence}`,
+    "",
+    "## 6-9 月节奏判断",
+    `- 6月：更关注美联储政策预期、美元和实际利率变化；若降息预期升温，黄金偏强。`,
+    `- 7-8月：若央行购金和避险需求延续，价格中枢有支撑；若美元反弹，容易高位震荡。`,
+    `- 9月：临近政策再定价窗口，波动可能放大，方向取决于降息兑现程度和实际利率。`,
     "",
     "## 主要驱动因素",
     ...(signal.drivers.length ? signal.drivers.map(d => `- ${d}`) : ["- 未从可用来源中提取到足够清晰的驱动因素。"]),
+    "",
+    "## 机构/来源观点归纳",
+    ...(signal.sourceViews.length ? signal.sourceViews.map(v => `- ${v}`) : ["- 来源观点不足，无法形成有效归纳。"]),
     "",
     "## 情景判断",
     `- 上行情景：${signal.drivers.includes("降息/实际利率下行") ? "若降息预期强化、实际利率回落，黄金上行动能增强。" : "若避险需求或宽松预期升温，黄金可能上行。"}`,
@@ -399,9 +410,8 @@ function buildResearchFinalReport(objective: string, collect: string): string {
     "## 风险与不确定性",
     ...(signal.risks.length ? signal.risks.map(r => `- ${r}`) : ["- 来源覆盖有限，无法排除关键信息缺失。"]),
     "",
-    "## 来源依据摘要",
+    "## 依据摘要",
     `可用来源数量：${signal.sourceCount}`,
-    "本报告只保留面向问题的综合结论；原始搜索和抓取内容保存在 collect/sources artifacts 中。",
   ].join("\n");
 }
 
@@ -415,21 +425,39 @@ function inferResearchSignal(objective: string, collect: string): ResearchSignal
   if (/美元走强|美元反弹|实际利率.*上|higher yields|strong dollar/i.test(text)) risks.push("美元/实际利率反弹");
   if (/回调|下跌|承压|跌至|bearish|pressure/i.test(text)) risks.push("高位回调风险");
   const sourceCount = (collect.match(/^### \d+\./gm) ?? []).length;
+  const sourceViews = extractSourceViews(collect).slice(0, 5);
   let trend: ResearchSignal["trend"] = "不确定";
   if (drivers.length >= 2 && risks.length >= 1) trend = "高位震荡";
   else if (drivers.length >= 2) trend = "偏强";
   else if (risks.length >= 2) trend = "偏弱";
   else if (sourceCount >= 2) trend = "高位震荡";
-  return { trend, drivers, risks, sourceCount };
+  const confidence: ResearchSignal["confidence"] = sourceCount >= 4 && drivers.length >= 2 ? "中" : sourceCount >= 2 ? "低" : "低";
+  return { trend, drivers, risks, sourceCount, sourceViews, confidence };
+}
+
+function extractSourceViews(collect: string): string[] {
+  const blocks = collect.split(/^### \d+\.\s+/m).slice(1);
+  return blocks.map(block => {
+    const title = block.split(/\r?\n/)[0]?.trim() || "未命名来源";
+    const text = block.replace(/\s+/g, " ").slice(0, 500);
+    const stance = /回调|承压|下跌|跌至|pressure|bearish/i.test(text)
+      ? "偏谨慎/看空"
+      : /上涨|支撑|降息|购金|避险|support|bullish|rate cut/i.test(text)
+      ? "偏支撑/看多"
+      : "中性/信息有限";
+    return `${title}：${stance}`;
+  }).filter(Boolean);
 }
 
 function evaluateResearchReportQuality(objective: string, output: string): { passed: boolean; reason?: string; score?: number } {
   const forbidden = /本报告基于 workflow|collect\/verify|来源摘录|前序来源摘要|# 候选来源|# 可信度判断/.test(output);
   const hasConclusion = /基准判断|当前可用来源不足|结论先行/.test(output);
   const hasScenario = /上行情景|震荡情景|下行情景/.test(output);
+  const hasTiming = /6月|7-8月|9月|节奏判断/.test(output);
+  const hasSourceViews = /机构\/来源观点归纳/.test(output);
   const mentionsCore = /黄金|agent|workflow|价格|趋势|问题/.test(output) || cleanResearchObjective(objective).length > 0;
-  const score = [!forbidden, hasConclusion, hasScenario, mentionsCore].filter(Boolean).length;
-  return { passed: score >= 4, reason: score >= 4 ? undefined : `report quality score ${score}/4; forbidden=${forbidden}`, score };
+  const score = [!forbidden, hasConclusion, hasScenario, hasTiming, hasSourceViews, mentionsCore].filter(Boolean).length;
+  return { passed: score >= 6, reason: score >= 6 ? undefined : `report quality score ${score}/6; forbidden=${forbidden}`, score };
 }
 
 function codeBlock(text: string): string {
