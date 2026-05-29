@@ -9,6 +9,7 @@ import { listCrons, addCron, deleteCron, updateCron } from "./infra/cron.js";
 import { buildAgentTeamWorkflow, type AgentTeamKind } from "./workflows/agent-team.js";
 import { createWorkflowStore } from "./workflows/store.js";
 import { runWorkflow } from "./workflows/runtime.js";
+import { createBrainstormPhaseOutput, generateBrainstormReport } from "./workflows/brainstorm-report.js";
 
 type CommandHandler = (args: string, state: SessionState, opts: Omit<AgentOptions, "onEvent">) => Promise<string> | string;
 
@@ -231,7 +232,7 @@ System Prompt：（子 agent 的角色和规则）
   },
 
   workflow: {
-    description: "管理生产级 workflow（/workflow list | start <research|code|kb> <目标> | show <id> | run <id>）",
+    description: "管理生产级 workflow（/workflow list | start <research|code|kb|brainstorm> <目标> | show <id> | run <id>）",
     handler: async (args) => {
       const [sub, ...rest] = args.trim().split(/\s+/);
       const store = createWorkflowStore();
@@ -248,7 +249,7 @@ System Prompt：（子 agent 的角色和规则）
       if (sub === "start") {
         const kind = rest.shift() as AgentTeamKind | undefined;
         const objective = rest.join(" ").trim();
-        if (kind !== "research" && kind !== "code" && kind !== "kb") return "用法：/workflow start <research|code|kb> <目标>";
+        if (kind !== "research" && kind !== "code" && kind !== "kb" && kind !== "brainstorm") return "用法：/workflow start <research|code|kb|brainstorm> <目标>";
         if (!objective) return "请提供 workflow 目标。";
         const run = store.createRun(buildAgentTeamWorkflow(kind, objective));
         store.appendEvent(run.id, "run_created", { source: "slash_command" });
@@ -283,15 +284,25 @@ System Prompt：（子 agent 的角色和规则）
         const result = await runWorkflow({
           store,
           runId: run.id,
-          executor: async ({ phase }) => ({
-            output: `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`,
-            artifacts: [{ name: `${phase.name}.txt`, contentType: "text/plain", content: `owner=${phase.owner}\noutput=${phase.outputName}` }],
-          }),
+          executor: async ({ run, phase, previousOutputs }) => {
+            const output = run.workflow.kind === "brainstorm"
+              ? createBrainstormPhaseOutput(run.workflow, phase.name, previousOutputs)
+              : `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`;
+            return {
+              output,
+              artifacts: [{ name: `${phase.name}.md`, contentType: "text/markdown", content: output }],
+            };
+          },
         });
+        if (result.workflow.kind === "brainstorm") {
+          const report = generateBrainstormReport(result);
+          store.saveArtifact(result.id, "roadmap", "final-report.md", "text/markdown", report.markdown);
+          return `✅ Brainstorm Workflow 执行结束：${result.id}\n状态：${result.status}\n\n${report.markdown}`;
+        }
         return `✅ Workflow 执行结束：${result.id}\n状态：${result.status}\n阶段：${result.phases.map(p => `${p.name}=${p.status}`).join(", ")}`;
       }
 
-      return "/workflow list — 列出 workflow\n/workflow start <research|code|kb> <目标> — 创建 workflow\n/workflow show <id> — 查看详情\n/workflow run <id> — 执行到结束";
+      return "/workflow list — 列出 workflow\n/workflow start <research|code|kb|brainstorm> <目标> — 创建 workflow\n/workflow show <id> — 查看详情\n/workflow run <id> — 执行到结束";
     },
   },
 };

@@ -18,6 +18,7 @@ import { summarizeCacheUsage } from "../infra/cache-usage.js";
 import { buildAgentTeamWorkflow, type AgentTeamKind } from "../workflows/agent-team.js";
 import { createWorkflowStore } from "../workflows/store.js";
 import { runWorkflow } from "../workflows/runtime.js";
+import { createBrainstormPhaseOutput, generateBrainstormReport } from "../workflows/brainstorm-report.js";
 
 const logger = createLogger("api");
 
@@ -432,7 +433,7 @@ export async function handleApiRequest(
     try {
       const body = JSON.parse(bodyStr || "{}");
       const kind = body.kind as AgentTeamKind;
-      if (kind !== "research" && kind !== "code" && kind !== "kb") throw new Error("kind must be research, code or kb");
+      if (kind !== "research" && kind !== "code" && kind !== "kb" && kind !== "brainstorm") throw new Error("kind must be research, code, kb or brainstorm");
       if (!body.objective || typeof body.objective !== "string") throw new Error("objective required");
       const store = createWorkflowStore();
       const run = store.createRun(buildAgentTeamWorkflow(kind, body.objective));
@@ -456,13 +457,20 @@ export async function handleApiRequest(
       const result = await runWorkflow({
         store,
         runId: run.id,
-        executor: async ({ phase }) => ({
-          output: `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`,
-          artifacts: [{ name: `${phase.name}.txt`, contentType: "text/plain", content: `owner=${phase.owner}\noutput=${phase.outputName}` }],
-        }),
+        executor: async ({ run, phase, previousOutputs }) => {
+          const output = run.workflow.kind === "brainstorm"
+            ? createBrainstormPhaseOutput(run.workflow, phase.name, previousOutputs)
+            : `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`;
+          return {
+            output,
+            artifacts: [{ name: `${phase.name}.md`, contentType: "text/markdown", content: output }],
+          };
+        },
       });
+      const report = result.workflow.kind === "brainstorm" ? generateBrainstormReport(result) : undefined;
+      if (report) store.saveArtifact(result.id, "roadmap", "final-report.md", "text/markdown", report.markdown);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, run: result }));
+      res.end(JSON.stringify({ ok: true, run: result, report }));
     } catch (e) {
       logger.error("workflow_run_failed", e, { id });
       res.writeHead(400, { "Content-Type": "application/json" });

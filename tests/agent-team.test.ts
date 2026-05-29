@@ -13,6 +13,13 @@ describe("agent team workflows", () => {
     expect(workflow.roles.map(r => r.name)).toEqual(["planner", "implementer", "reviewer", "tester"]);
   });
 
+  it("builds a brainstorm council", () => {
+    const workflow = buildAgentTeamWorkflow("brainstorm", "构建划时代产品");
+    expect(workflow.roles.map(r => r.name)).toContain("educator");
+    expect(workflow.roles.map(r => r.name)).toContain("skeptic");
+    expect(workflow.phases.map(p => p.name)).toEqual(["observe", "diverge", "challenge", "converge", "prototype", "roadmap"]);
+  });
+
   it("renders workflow", () => {
     expect(renderAgentTeamWorkflow(buildAgentTeamWorkflow("kb", "IM 入库"))).toContain("Agent Team Workflow");
   });
