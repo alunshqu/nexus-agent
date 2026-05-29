@@ -5,7 +5,7 @@ import { getMcpTools, callMcpTool, mcpToolMap } from "../infra/mcp.js";
 import { prepareMessages } from "./context.js";
 import { saveMessage, repairSessionMessages, updateSessionStatus, rewriteSessionMessages } from "../infra/session.js";
 import { fireHook } from "../infra/hooks.js";
-import { inc, timing } from "../infra/metrics.js";
+import { inc, timing, gauge } from "../infra/metrics.js";
 import type { SessionState } from "./types.js";
 import type { Provider, TokenUsage } from "../infra/provider.js";
 import { startTrace, finalizeTrace, addErrorEvent, type Trace } from "../infra/trace.js";
@@ -14,7 +14,7 @@ import { memoryTools, executeMemoryTool, retrieveForSystem, retrieveForMessages,
 import { shouldColdStartCompress, coldStartCompressMessages } from "./cold-start.js";
 import { stableTools, buildActiveTools } from "../tools/tool-assembly.js";
 import { toolCallSignature } from "../tools/tool-dedupe.js";
-import { selectPrinciplesForTask, renderActivePrinciplesForPrompt, createEmptyPrincipleEvidence, recordToolEvidence, recordToolResultEvidence, evaluatePrinciples, maybeIngestUserCorrection, type ActivePrinciple, type PrincipleEvidence } from "../principles/index.js";
+import { selectPrinciplesForTask, renderActivePrincipleIdsForPrompt, createEmptyPrincipleEvidence, recordToolEvidence, recordToolResultEvidence, evaluatePrinciples, maybeIngestUserCorrection, type ActivePrinciple, type PrincipleEvidence } from "../principles/index.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -127,8 +127,8 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       ? `\n<user_memory>\n${coreMemory}\n</user_memory>\n<context>\n${dynamicContext}\n</context>`
       : `\n<context>\n${dynamicContext}\n</context>`;
 
-    const principleSuffix = renderActivePrinciplesForPrompt(activePrinciples);
-    const runSuffix = [memorySuffix, principleSuffix].filter(Boolean).join("\n\n");
+    const runSuffix = memorySuffix;
+    const principleRuntimeContext = renderActivePrincipleIdsForPrompt(activePrinciples);
 
     phase = "retrieve_context_memory";
     let contextMemory = "";
@@ -136,16 +136,18 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       contextMemory = await retrieveForMessages(userMessage);
     }
 
-    // contextMemory is per-message (changes every request) — append to the last user message content.
-    // Skills are intentionally NOT injected here: OpenAI caches longest shared prefixes,
-    // and Anthropic cache_control is on system/tools/message breakpoints. Dynamic tail
-    // skill injection would change the final user message every request and reduce cache reuse.
-    if (contextMemory && loopMessages.length > 0) {
+    // Dynamic per-turn context is appended only to the last user message in loopMessages.
+    // It is not persisted to session history, and it stays after the stable system/tools/history
+    // prefix so OpenAI prompt caching can continue matching the longest shared prefix.
+    const lastUserParts: string[] = [];
+    if (contextMemory) lastUserParts.push(`[相关记忆]\n${contextMemory}`);
+    if (principleRuntimeContext) lastUserParts.push(principleRuntimeContext);
+    if (lastUserParts.length > 0 && loopMessages.length > 0) {
       const lastMsg = loopMessages[loopMessages.length - 1];
       if (lastMsg.role === "user" && typeof lastMsg.content === "string") {
         loopMessages[loopMessages.length - 1] = {
           ...lastMsg,
-          content: `${lastMsg.content}\n\n[相关记忆]\n${contextMemory}`,
+          content: `${lastMsg.content}\n\n${lastUserParts.join("\n\n")}`,
         };
       }
     }
@@ -185,6 +187,10 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
         totalUsage.output_tokens += usage.output_tokens;
         totalUsage.cache_creation_input_tokens! += usage.cache_creation_input_tokens ?? 0;
         totalUsage.cache_read_input_tokens! += usage.cache_read_input_tokens ?? 0;
+        inc("tokens.cache_creation", usage.cache_creation_input_tokens ?? 0);
+        inc("tokens.cache_read", usage.cache_read_input_tokens ?? 0);
+        const cacheDenominator = usage.input_tokens + (usage.cache_read_input_tokens ?? 0);
+        if (cacheDenominator > 0) gauge("tokens.cache_hit_ratio_last", (usage.cache_read_input_tokens ?? 0) / cacheDenominator);
         state.lastInputTokens = usage.input_tokens;
       }
 

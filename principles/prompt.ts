@@ -5,6 +5,11 @@ export function renderActivePrinciplesForPrompt(principles: ActivePrinciple[]): 
   return `<active_principles>\n${principles.map(renderPrinciple).join("\n\n")}\n</active_principles>`;
 }
 
+export function renderActivePrincipleIdsForPrompt(principles: ActivePrinciple[]): string {
+  if (principles.length === 0) return "";
+  return `<runtime_context>\nActive principles for this turn: ${principles.map(p => p.id).join(", ")}\nApply the mandatory actions from the stable principle registry.\n</runtime_context>`;
+}
+
 function renderPrinciple(principle: ActivePrinciple): string {
   return [
     `[${principle.id}] ${principle.title}`,

@@ -103,6 +103,14 @@ export function getTraces(sessionId: string): Array<{ id: string; userMessage: s
 export function getTrace(sessionId: string, traceId: string): Trace | undefined {
   const row = selectTrace.get(traceId) as any;
   if (!row || row.session_id !== sessionId) return undefined;
+  return rowToTrace(row);
+}
+
+export function getRecentFullTraces(limit = 100): Trace[] {
+  return (db.prepare("SELECT * FROM traces WHERE end_ts IS NOT NULL ORDER BY start_ts DESC LIMIT ?").all(limit) as any[]).map(rowToTrace);
+}
+
+function rowToTrace(row: any): Trace {
   return {
     id: row.id,
     sessionId: row.session_id,

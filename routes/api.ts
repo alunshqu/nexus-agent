@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync
 import path from "path";
 import os from "os";
 import { agentConfig, applyConfig, cacheProviderModels, getConfigForClient, resetConfig, upsertProvider } from "../infra/config.js";import { fetchModels } from "../infra/provider.js";
-import { getTraces, getTrace, getAllTraces } from "../infra/trace.js";
+import { getTraces, getTrace, getAllTraces, getRecentFullTraces } from "../infra/trace.js";
 import { getMcpStatus, addMcpServer, removeMcpServer, reconnectAll } from "../infra/mcp.js";
 import { handleHttpChat, handleSessionGet } from "../adapters/http.js";
 import { invalidateSystemPrompt } from "../prompt.js";
@@ -14,6 +14,7 @@ import { createLogger, redact } from "../infra/logger.js";
 import { listCrons, getCron, addCron, updateCron, deleteCron } from "../infra/cron.js";
 import { reloadHooks } from "../infra/hooks.js";
 import { getMetrics, gauge } from "../infra/metrics.js";
+import { summarizeCacheUsage } from "../infra/cache-usage.js";
 
 const logger = createLogger("api");
 
@@ -50,6 +51,15 @@ export async function handleApiRequest(
     gauge("sessions.total", sessions.length);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(getMetrics()));
+    return true;
+  }
+
+  if (url.startsWith("/api/cache-usage") && req.method === "GET") {
+    const parsed = new URL(url, "http://localhost");
+    const limit = Math.min(Math.max(Number(parsed.searchParams.get("limit") ?? 50), 1), 500);
+    const summary = summarizeCacheUsage(getRecentFullTraces(limit));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(summary));
     return true;
   }
 

@@ -26,6 +26,14 @@ describe("principle runtime", () => {
     expect(prompt).toContain("Evaluation must-have");
   });
 
+  it("renders short active principle ids for dynamic runtime context", async () => {
+    const { renderActivePrincipleIdsForPrompt } = await import("../principles/prompt.js");
+    const prompt = renderActivePrincipleIdsForPrompt(selectPrinciplesForTask("修一下这个 bug", undefined, 2));
+    expect(prompt).toContain("<runtime_context>");
+    expect(prompt).toContain("P-PRINCIPLE-ACTIVE-RETRIEVAL");
+    expect(prompt).not.toContain("Required actions");
+  });
+
   it("evaluates source-fix application with code change, test and validation evidence", () => {
     const principles = selectPrinciplesForTask("这个工具重复调用的 bug 修一下");
     const evidence = createEmptyPrincipleEvidence("这个工具重复调用的 bug 修一下");

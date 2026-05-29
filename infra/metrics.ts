@@ -19,6 +19,14 @@ export function gauge(name: string, value: number) {
   gauges[name] = { value };
 }
 
+export function counterValue(name: string): number {
+  return counters[name]?.value ?? 0;
+}
+
+export function gaugeValue(name: string): number | undefined {
+  return gauges[name]?.value;
+}
+
 export function timing(name: string, durationMs: number) {
   if (!Number.isFinite(durationMs)) return;
   const current = timings[name];
