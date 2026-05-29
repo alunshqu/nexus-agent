@@ -70,6 +70,34 @@ describe("task-oriented workflow executor", () => {
     expect(events.some(e => e.type === "phase_failed")).toBe(true);
   });
 
+  it("generates user-facing research report instead of workflow logs", async () => {
+    const store = createWorkflowStore(path.join(dir, "workflow.db"));
+    const result = await runWorkflow({
+      store,
+      workflow: buildAgentTeamWorkflow("research", "调研黄金价格从2026年6月到9月的趋势，重点分析美联储利率、美元、实际利率、央行购金、地缘风险和机构观点"),
+      executor: createTaskWorkflowExecutor(store, {
+        researchTools: {
+          search: async () => JSON.stringify({
+            provider: "fake",
+            results: [
+              { title: "World Gold Council outlook", url: "https://example.com/wgc", snippet: "央行购金 and geopolitical risk support gold" },
+              { title: "Fed rate cut outlook", url: "https://example.com/fed", snippet: "rate cut and lower real yields may support gold" },
+              { title: "Dollar risk", url: "https://example.com/dollar", snippet: "strong dollar and higher yields pressure gold" },
+            ],
+          }),
+          fetch: async ({ url }) => JSON.stringify({ url, status: 200, body: `央行购金 地缘风险 降息 lower real yields strong dollar higher yields pressure gold. `.repeat(20) }),
+        },
+      }),
+    });
+    finalizeWorkflowArtifacts(store, result);
+    const final = store.listArtifacts(result.id).find(a => a.name === "final-report.md");
+
+    expect(result.status).toBe("completed");
+    expect(final?.content).toContain("基准判断");
+    expect(final?.content).toContain("情景判断");
+    expect(final?.content).not.toMatch(/本报告基于 workflow|collect\/verify|来源摘录|前序来源摘要|# 候选来源|# 可信度判断/);
+  });
+
   it("runs brainstorm template and emits final report", async () => {
     const store = createWorkflowStore(path.join(dir, "workflow.db"));
     const workflow = getWorkflowTemplate("brainstorm-council")!.build("构建下一个产品方向");

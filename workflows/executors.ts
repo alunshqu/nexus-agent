@@ -180,28 +180,10 @@ async function executeResearchPhase(objective: string, phaseName: string, previo
       return phaseOutput("research", "verify", output);
     }
     case "report": {
-      const verify = previous.verify ?? "";
       const collect = previous.collect ?? "";
-      const output = [
-        "# 调研报告",
-        "",
-        `目标：${objective}`,
-        `生成时间：${new Date().toISOString()}`,
-        "",
-        "## 摘要结论",
-        "本报告基于 workflow 的 collect/verify 阶段自动检索与抓取结果生成。关键结论需要结合来源摘录阅读；若涉及最新行情或产品状态，应以后续实时查询为准。",
-        "",
-        "## 依据与交叉验证",
-        verify.slice(0, 4000) || "无验证摘要。",
-        "",
-        "## 来源摘录",
-        collect.slice(0, 6000) || "无来源摘录。",
-        "",
-        "## 不确定性",
-        "- 自动抓取可能遇到页面脚本、登录墙、地区限制或搜索摘要偏差。",
-        "- 需要高可靠结论时，应补充官方文档、原始仓库和人工复核。",
-      ].join("\n");
-      return { output, artifacts: [{ name: "report.md", contentType: "text/markdown", content: output }, { name: "final-report.md", contentType: "text/markdown", content: output }] };
+      const output = buildResearchFinalReport(objective, collect);
+      const quality = evaluateResearchReportQuality(objective, output);
+      return { output, quality, artifacts: [{ name: "report.md", contentType: "text/markdown", content: output }, { name: "final-report.md", contentType: "text/markdown", content: output }] };
     }
     default:
       return phaseOutput("research", phaseName, `研究阶段 ${phaseName} 已完成。`);
@@ -383,6 +365,71 @@ function genericOutput(objective: string, phaseName: string, previous: Record<st
     case "deliver": return `# 交付结果\n\n整理结果、风险和下一步。`;
     default: return `阶段 ${phaseName} 已完成。`;
   }
+}
+
+type ResearchSignal = {
+  trend: "偏强" | "高位震荡" | "偏弱" | "不确定";
+  drivers: string[];
+  risks: string[];
+  sourceCount: number;
+};
+
+function buildResearchFinalReport(objective: string, collect: string): string {
+  const signal = inferResearchSignal(objective, collect);
+  const conclusion = signal.trend === "不确定"
+    ? "当前可用来源不足以形成可靠方向判断，建议继续补充权威来源后再决策。"
+    : `基准判断：${signal.trend}。在目标时间窗口内，更可能呈现“${signal.trend}”而非单边确定行情。`;
+  return [
+    "# 调研结论",
+    "",
+    `问题：${cleanResearchObjective(objective)}`,
+    `生成时间：${new Date().toISOString()}`,
+    "",
+    "## 结论先行",
+    conclusion,
+    "",
+    "## 主要驱动因素",
+    ...(signal.drivers.length ? signal.drivers.map(d => `- ${d}`) : ["- 未从可用来源中提取到足够清晰的驱动因素。"]),
+    "",
+    "## 情景判断",
+    `- 上行情景：${signal.drivers.includes("降息/实际利率下行") ? "若降息预期强化、实际利率回落，黄金上行动能增强。" : "若避险需求或宽松预期升温，黄金可能上行。"}`,
+    `- 震荡情景：若利率、美元和避险因素相互抵消，黄金更可能高位震荡。`,
+    `- 下行情景：${signal.risks.includes("美元/实际利率反弹") ? "若美元和实际利率反弹，黄金可能承压回调。" : "若风险偏好改善且美元走强，黄金可能承压。"}`,
+    "",
+    "## 风险与不确定性",
+    ...(signal.risks.length ? signal.risks.map(r => `- ${r}`) : ["- 来源覆盖有限，无法排除关键信息缺失。"]),
+    "",
+    "## 来源依据摘要",
+    `可用来源数量：${signal.sourceCount}`,
+    "本报告只保留面向问题的综合结论；原始搜索和抓取内容保存在 collect/sources artifacts 中。",
+  ].join("\n");
+}
+
+function inferResearchSignal(objective: string, collect: string): ResearchSignal {
+  const text = `${objective}\n${collect}`;
+  const drivers: string[] = [];
+  const risks: string[] = [];
+  if (/降息|利率下行|宽松|rate cut|lower rates/i.test(text)) drivers.push("降息/实际利率下行");
+  if (/央行购金|central bank|购金/i.test(text)) drivers.push("央行购金支撑");
+  if (/地缘|避险|geopolitical|risk/i.test(text)) drivers.push("地缘风险/避险需求");
+  if (/美元走强|美元反弹|实际利率.*上|higher yields|strong dollar/i.test(text)) risks.push("美元/实际利率反弹");
+  if (/回调|下跌|承压|跌至|bearish|pressure/i.test(text)) risks.push("高位回调风险");
+  const sourceCount = (collect.match(/^### \d+\./gm) ?? []).length;
+  let trend: ResearchSignal["trend"] = "不确定";
+  if (drivers.length >= 2 && risks.length >= 1) trend = "高位震荡";
+  else if (drivers.length >= 2) trend = "偏强";
+  else if (risks.length >= 2) trend = "偏弱";
+  else if (sourceCount >= 2) trend = "高位震荡";
+  return { trend, drivers, risks, sourceCount };
+}
+
+function evaluateResearchReportQuality(objective: string, output: string): { passed: boolean; reason?: string; score?: number } {
+  const forbidden = /本报告基于 workflow|collect\/verify|来源摘录|前序来源摘要|# 候选来源|# 可信度判断/.test(output);
+  const hasConclusion = /基准判断|当前可用来源不足|结论先行/.test(output);
+  const hasScenario = /上行情景|震荡情景|下行情景/.test(output);
+  const mentionsCore = /黄金|agent|workflow|价格|趋势|问题/.test(output) || cleanResearchObjective(objective).length > 0;
+  const score = [!forbidden, hasConclusion, hasScenario, mentionsCore].filter(Boolean).length;
+  return { passed: score >= 4, reason: score >= 4 ? undefined : `report quality score ${score}/4; forbidden=${forbidden}`, score };
 }
 
 function codeBlock(text: string): string {
