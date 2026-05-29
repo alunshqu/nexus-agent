@@ -80,7 +80,12 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       : "";
 
     phase = "select_principles";
-    activePrinciples = selectPrinciplesForTask(userMessage);
+    // Principles are DISABLED by default: their per-turn selection varies with the user
+    // message, which mutated systemSuffix and was suspected of destabilizing the cache.
+    // Set PRINCIPLES_ENABLED=1 to restore. When off, activePrinciples stays empty and the
+    // whole principle pipeline (suffix injection, evidence, eval) becomes a no-op.
+    const principlesEnabled = process.env.PRINCIPLES_ENABLED === "1";
+    activePrinciples = principlesEnabled ? selectPrinciplesForTask(userMessage) : [];
     principleEvidence = createEmptyPrincipleEvidence(userMessage);
 
     phase = "start_trace";
@@ -108,7 +113,12 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
     const prepareStart = Date.now();
     const prepareResult = await prepareMessages(state.messages, state.lastInputTokens);
     timing("context.prepare_ms", Date.now() - prepareStart);
-    loopMessages = prepareResult.messages;
+    // Copy the array: prepareMessages returns state.messages by reference when no
+    // compression happens, which would alias loopMessages to state.messages. Then
+    // state.messages.push(assistant) (line ~207) silently appends to loopMessages too,
+    // and the explicit loopMessages spread (line ~209) adds it a SECOND time → two
+    // assistant blocks with the same tool_use id → Bedrock TOOL_DUPLICATE 400.
+    loopMessages = [...prepareResult.messages];
     if (prepareResult.persistBack) {
       state.messages = prepareResult.messages;
       rewriteSessionMessages(state.id, state.messages);
@@ -127,7 +137,6 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       ? `\n<user_memory>\n${coreMemory}\n</user_memory>\n<context>\n${dynamicContext}\n</context>`
       : `\n<context>\n${dynamicContext}\n</context>`;
 
-    const runSuffix = memorySuffix;
     const principleRuntimeContext = renderActivePrincipleIdsForPrompt(activePrinciples);
 
     phase = "retrieve_context_memory";
@@ -136,21 +145,16 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       contextMemory = await retrieveForMessages(userMessage);
     }
 
-    // Dynamic per-turn context is appended only to the last user message in loopMessages.
-    // It is not persisted to session history, and it stays after the stable system/tools/history
-    // prefix so OpenAI prompt caching can continue matching the longest shared prefix.
-    const lastUserParts: string[] = [];
-    if (contextMemory) lastUserParts.push(`[相关记忆]\n${contextMemory}`);
-    if (principleRuntimeContext) lastUserParts.push(principleRuntimeContext);
-    if (lastUserParts.length > 0 && loopMessages.length > 0) {
-      const lastMsg = loopMessages[loopMessages.length - 1];
-      if (lastMsg.role === "user" && typeof lastMsg.content === "string") {
-        loopMessages[loopMessages.length - 1] = {
-          ...lastMsg,
-          content: `${lastMsg.content}\n\n${lastUserParts.join("\n\n")}`,
-        };
-      }
-    }
+    // All per-turn dynamic content (core memory, env/date, retrieved memory, runtime
+    // principles) goes into runSuffix → provider places it AFTER the cache prefix
+    // (Anthropic: 2nd system block; OpenAI: tail of input[]). It must never be injected
+    // into messages: loopMessages can share object refs with state.messages, so mutating
+    // a message here would leak dynamic content into persisted history and bust the
+    // prefix cache on every turn.
+    const suffixParts = [memorySuffix];
+    if (contextMemory) suffixParts.push(`\n<retrieved_memory>\n${contextMemory}\n</retrieved_memory>`);
+    if (principleRuntimeContext) suffixParts.push(`\n${principleRuntimeContext}`);
+    const runSuffix = suffixParts.join("");
 
     for (iteration = 0; iteration < maxIter; iteration++) {
       phase = "iteration_start";
@@ -164,7 +168,10 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       });
 
       phase = "trace_llm_call";
-      trace.events.push({ type: "llm_call", iteration, model: provider.model, systemPrompt, messages: loopMessages, ts: Date.now() });
+      // Snapshot messages: loopMessages is reassigned (not mutated) each iteration, but
+      // storing the live ref means finalizeTrace serializes the turn's FINAL state for
+      // every iteration, corrupting the delta-compression prefix diff (phantom tool_use).
+      trace.events.push({ type: "llm_call", iteration, model: provider.model, systemPrompt, messages: loopMessages.slice(), ts: Date.now() });
 
       phase = "provider_stream";
       updateSessionStatus(state.id, { running: true, currentPhase: "thinking", currentTool: undefined, startedAt: trace.startTs });
@@ -175,6 +182,7 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
         messages: loopMessages,
         tools: allTools,
         onText: (delta) => onEvent({ type: "text", delta }),
+        sessionId: state.id,
       });
       timing("provider.stream_ms", Date.now() - streamStart);
 

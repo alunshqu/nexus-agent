@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import { applyCache, applyMessageCache } from "../domain/context.js";
+import { applyCache } from "../domain/context.js";
 import { createLogger, truncateString, truncateValue } from "./logger.js";
 import { inc } from "./metrics.js";
 
@@ -45,6 +45,7 @@ export interface Provider {
     messages: Anthropic.MessageParam[];
     tools: Anthropic.Tool[];
     onText: (delta: string) => void;
+    sessionId?: string;
   }): Promise<{
     stopReason: string;
     content: Anthropic.ContentBlock[];
@@ -71,6 +72,10 @@ export function createAnthropicProvider(config: ProviderConfig): Provider {
       "x-app": "cli",
       "anthropic-dangerous-direct-browser-access": "true",
       "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24",
+      // Claude Code identifier. Kept STATIC (no per-request fields) on purpose: a value
+      // that changes each request defeats the upstream prompt cache. X-Stainless-* headers
+      // (lang/os/arch/runtime/version) are auto-injected by the SDK, so not set here.
+      "x-anthropic-billing-header": "cc_version=2.1.121; cc_entrypoint=cli",
     },
   });
   const model = config.model ?? "claude-opus-4-7";
@@ -80,7 +85,7 @@ export function createAnthropicProvider(config: ProviderConfig): Provider {
     type: "anthropic",
     model,
     contextWindow: getAnthropicContextWindow(model),
-    async stream({ systemPrompt, systemSuffix, messages, tools, onText }) {
+    async stream({ systemPrompt, systemSuffix, messages, tools, onText, sessionId }) {
       const context = () => ({
         providerType: "anthropic",
         model,
@@ -101,10 +106,18 @@ export function createAnthropicProvider(config: ProviderConfig): Provider {
           const s = client.messages.stream({
           model,
           max_tokens: maxTokens,
+          // Top-level cache_control (prompt-caching-scope-2026-01-05): the API auto-places
+          // the breakpoint on the last cacheable block and rolls it forward as the
+          // conversation grows. A manual breakpoint on the moving messages[-2] position
+          // created unstable cache scopes — let the scope beta own the message tail.
+          cache_control: { type: "ephemeral" },
           system: systemBlocks,
           tools: applyCache(tools),
-          messages: applyMessageCache(messages),
+          messages,
           thinking: { type: "adaptive" },
+          // user_id groups requests by end-user for Anthropic's abuse monitoring (best
+          // practice). It does NOT affect prefix caching. Uses the no-PII session uuid.
+          ...(sessionId ? { metadata: { user_id: sessionId } } : {}),
         } as any);
 
         s.on("text", onText);
@@ -118,6 +131,14 @@ export function createAnthropicProvider(config: ProviderConfig): Provider {
         inc("tokens.input", usage.input_tokens);
         inc("tokens.output", usage.output_tokens);
         inc("provider.requests");
+        logger.info("anthropic.usage", {
+          model,
+          input: usage.input_tokens,
+          output: usage.output_tokens,
+          cacheRead: usage.cache_read_input_tokens ?? 0,
+          cacheCreate: usage.cache_creation_input_tokens ?? 0,
+          hitRatio: Number(((usage.cache_read_input_tokens ?? 0) / Math.max(1, usage.input_tokens + (usage.cache_read_input_tokens ?? 0))).toFixed(3)),
+        });
         return { stopReason: msg.stop_reason ?? "end_turn", content: msg.content as any, usage, abort: () => (s as any).abort?.() };
         } catch (error) {
           logger.error("anthropic.stream_exception", error, context());
@@ -145,7 +166,7 @@ export function createOpenAIProvider(config: ProviderConfig): Provider {
     type: "openai",
     model,
     contextWindow: getOpenAIContextWindow(model),
-    async stream({ systemPrompt, systemSuffix, messages, tools, onText }) {
+    async stream({ systemPrompt, systemSuffix, messages, tools, onText, sessionId }) {
       const input = buildResponsesInput(systemSuffix, messages);
       const responsesTools = buildResponsesTools(tools);
 
@@ -170,10 +191,18 @@ export function createOpenAIProvider(config: ProviderConfig): Provider {
           },
           body: JSON.stringify({
             model,
-            instructions: systemSuffix ? `${systemPrompt}${systemSuffix}` : systemPrompt,
+            // instructions holds ONLY the static system prompt. Dynamic content (date,
+            // memory) goes to the END of input via buildResponsesInput, because this
+            // endpoint folds instructions into the cache-prefix — putting the daily date
+            // here punctures the whole prefix every day. Verified by probing the endpoint:
+            // mutating the instructions tail dropped cached_tokens from full to partial.
+            instructions: systemPrompt,
             input: input,
             tools: responsesTools.length > 0 ? responsesTools : undefined,
             max_output_tokens: maxOutputTokens,
+            // Stable per-session key: routes a session's requests to the same cache shard
+            // (OpenAI best practice). Constant across a session's turns, distinct per session.
+            prompt_cache_key: sessionId || undefined,
             stream: true,
           }),
         });
@@ -289,7 +318,7 @@ export function createOpenAIProvider(config: ProviderConfig): Provider {
 
 // Convert Anthropic MessageParam[] to Responses API input items.
 // Tool calls and tool results are top-level items (not wrapped in role messages).
-function buildResponsesInput(
+export function buildResponsesInput(
   systemSuffix: string | undefined,
   messages: Anthropic.MessageParam[]
 ): unknown[] {
@@ -337,6 +366,13 @@ function buildResponsesInput(
         });
       }
     }
+  }
+
+  // Dynamic per-turn context (memory, date, cwd) is appended at the TAIL of input so it
+  // sits after the stable prefix (instructions + history) and never invalidates the
+  // cache. The last item the model sees is still the live turn context.
+  if (systemSuffix) {
+    items.push({ role: "user", content: systemSuffix });
   }
 
   return items;

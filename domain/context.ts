@@ -289,18 +289,3 @@ export function applyCache<T extends Anthropic.Tool>(tools: T[]): any[] {
     i === tools.length - 1 ? { ...t, cache_control: { type: "ephemeral" } } : t
   );
 }
-
-export function applyMessageCache(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
-  const cacheIdx = messages.length - 2;
-  return messages.map((m, i) => {
-    if (i !== cacheIdx || cacheIdx < 0) return m;
-    if (typeof m.content === "string")
-      return { ...m, content: [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }] };
-    if (Array.isArray(m.content) && m.content.length > 0) {
-      const blocks = [...m.content as any[]];
-      blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: { type: "ephemeral" } };
-      return { ...m, content: blocks };
-    }
-    return m;
-  });
-}

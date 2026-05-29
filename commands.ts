@@ -3,6 +3,7 @@ import { estimateTokens, prepareMessages } from "./domain/context.js";
 import { agentConfig, getConfigForClient, applyConfig } from "./infra/config.js";
 import { getActiveMemories, getMemoriesByType, searchMemories } from "./memory/index.js";
 import { getTraces } from "./infra/trace.js";
+import { rewriteSessionMessages } from "./infra/session.js";
 import { agentTemplates } from "./agents/index.js";
 import { listCrons, addCron, deleteCron, updateCron } from "./infra/cron.js";
 
@@ -48,6 +49,9 @@ const commands: Record<string, { description: string; handler: CommandHandler }>
       const { messages: compressed } = await prepareMessages(state.messages, state.lastInputTokens ?? before * 4);
       const after = compressed.reduce((s: number, m: any) => s + estimateTokens(m), 0);
       state.messages.splice(0, state.messages.length, ...compressed);
+      // Persist the compressed history so it survives reconnect/DB reload and isn't
+      // recomputed next turn (same in-memory-only pitfall as /clear had).
+      rewriteSessionMessages(state.id, state.messages);
       state.lastInputTokens = undefined;
       return `压缩完成：${before.toLocaleString()} → ${after.toLocaleString()} tokens（节省 ${((1 - after / before) * 100).toFixed(0)}%）`;
     },
@@ -57,6 +61,11 @@ const commands: Record<string, { description: string; handler: CommandHandler }>
     description: "清空对话历史（保留记忆）",
     handler: (_, state) => {
       state.messages.splice(0, state.messages.length);
+      // Persist the clear: in-memory state is reused across turns AND reloaded from DB on
+      // reconnect, so wiping only state.messages let history resurrect from sqlite.
+      rewriteSessionMessages(state.id, []);
+      state.lastInputTokens = undefined;
+      state.lastActivityAt = undefined;
       return "对话历史已清空。记忆和配置保留。";
     },
   },
