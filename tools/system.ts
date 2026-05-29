@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SessionState } from "../domain/types.js";
 import { agentConfig, applyConfig, upsertProvider } from "../infra/config.js";
+import type { ProviderProfile } from "../infra/config.js";
 import { addMcpServer, removeMcpServer, getMcpStatus, reconnectAll } from "../infra/mcp.js";
 import { fetchModels } from "../infra/provider.js";
 import { invalidateSystemPrompt } from "../prompt.js";
@@ -217,6 +218,18 @@ export const systemTools: Anthropic.Tool[] = [
   },
 ];
 
+function resolveProvider(providerIdOrDisplay: string): ProviderProfile | undefined {
+  const providers = agentConfig.current.providers ?? [];
+  const needle = providerIdOrDisplay.trim();
+  return providers.find(p =>
+    p.id === needle ||
+    p.name === needle ||
+    `${p.name} [${p.type}]` === needle ||
+    `${p.id} [${p.type}]` === needle ||
+    p.baseURL === needle
+  );
+}
+
 export async function executeSystemTool(
   name: string,
   input: Record<string, unknown>,
@@ -237,7 +250,7 @@ export async function executeSystemTool(
       case "system_list_models": {
         const providerId = input.providerId ? String(input.providerId) : undefined;
         const provider = providerId
-          ? agentConfig.current.providers?.find(p => p.id === providerId)
+          ? resolveProvider(providerId)
           : agentConfig.current;
         if (!provider) return { content: `未找到 provider: ${providerId}`, is_error: true };
         const models = await fetchModels({ type: (provider as any).type, apiKey: (provider as any).apiKey, baseURL: (provider as any).baseURL });
@@ -249,9 +262,9 @@ export async function executeSystemTool(
         const model = String(input.model ?? "");
         const providerId = input.providerId ? String(input.providerId) : undefined;
         if (providerId) {
-          const provider = agentConfig.current.providers?.find(p => p.id === providerId);
+          const provider = resolveProvider(providerId);
           if (!provider) return { content: `未找到 provider: ${providerId}`, is_error: true };
-          applyConfig({ ...agentConfig.current, model, activeProviderId: providerId });
+          applyConfig({ ...agentConfig.current, model, activeProviderId: provider.id });
         } else {
           applyConfig({ ...agentConfig.current, model });
         }
@@ -263,7 +276,7 @@ export async function executeSystemTool(
         const providers = agentConfig.current.providers ?? [];
         const activeId = agentConfig.current.activeProviderId;
         const lines = providers.map(p =>
-          `${p.id === activeId ? "▶ " : "  "}${p.name} [${p.type}]${p.baseURL ? ` — ${p.baseURL}` : ""}`
+          `${p.id === activeId ? "▶ " : "  "}id=${p.id} name=${p.name} [${p.type}]${p.baseURL ? ` — ${p.baseURL}` : ""}`
         );
         return { content: `当前模型：${agentConfig.provider.model}\n\nProviders：\n${lines.join("\n")}` };
       }
