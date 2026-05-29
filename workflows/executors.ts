@@ -2,10 +2,21 @@ import type { WorkflowRun } from "./runner.js";
 import type { WorkflowStore } from "./store.js";
 import type { WorkflowExecutor, WorkflowExecutorContext, WorkflowExecutorResult } from "./runtime.js";
 import { createBrainstormPhaseOutput, generateBrainstormReport } from "./brainstorm-report.js";
+import { toolWebFetch, toolWebSearch } from "../tools/web.js";
 
 export type RegisteredWorkflowExecutor = WorkflowExecutor & { id?: string };
 
-export function createTaskWorkflowExecutor(store: WorkflowStore): RegisteredWorkflowExecutor {
+type ResearchTools = {
+  search: (input: Record<string, unknown>) => Promise<string>;
+  fetch: (input: Record<string, unknown>) => Promise<string>;
+};
+
+type TaskWorkflowExecutorOptions = {
+  researchTools?: ResearchTools;
+};
+
+export function createTaskWorkflowExecutor(store: WorkflowStore, options: TaskWorkflowExecutorOptions = {}): RegisteredWorkflowExecutor {
+  const researchTools = options.researchTools ?? { search: toolWebSearch, fetch: toolWebFetch };
   return async function taskWorkflowExecutor(context: WorkflowExecutorContext): Promise<WorkflowExecutorResult> {
     const { run, phase, previousOutputs } = context;
 
@@ -25,7 +36,7 @@ export function createTaskWorkflowExecutor(store: WorkflowStore): RegisteredWork
     }
 
     if (run.workflow.kind === "research") {
-      return phaseOutput("research", phase.name, researchOutput(run.workflow.objective, phase.name, previousOutputs));
+      return executeResearchPhase(run.workflow.objective, phase.name, previousOutputs, researchTools);
     }
 
     if (run.workflow.kind === "code") {
@@ -73,6 +84,97 @@ function phaseOutput(prefix: string, phaseName: string, output: string): Workflo
   return { output, artifacts: [{ name: `${phaseName}.md`, contentType: "text/markdown", content: output }] };
 }
 
+async function executeResearchPhase(objective: string, phaseName: string, previous: Record<string, string>, tools: ResearchTools): Promise<WorkflowExecutorResult> {
+  switch (phaseName) {
+    case "collect": {
+      const searchRaw = await tools.search({ query: objective, max_results: 6 });
+      const parsed = parseJsonObject(searchRaw);
+      const results = Array.isArray(parsed.results) ? parsed.results.slice(0, 4) : [];
+      const fetched: Array<{ title?: string; url?: string; status?: number; excerpt?: string; error?: string }> = [];
+      for (const result of results) {
+        const url = typeof result?.url === "string" ? result.url : undefined;
+        if (!url) continue;
+        try {
+          const fetchRaw = await tools.fetch({ url });
+          const fetchedJson = parseJsonObject(fetchRaw);
+          fetched.push({
+            title: typeof result.title === "string" ? result.title : undefined,
+            url,
+            status: typeof fetchedJson.status === "number" ? fetchedJson.status : undefined,
+            excerpt: typeof fetchedJson.body === "string" ? fetchedJson.body.slice(0, 1200) : undefined,
+          });
+        } catch (error) {
+          fetched.push({ title: result.title, url, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      const output = [
+        "# 候选来源与关键事实",
+        "",
+        `目标：${objective}`,
+        `查询时间：${new Date().toISOString()}`,
+        "",
+        "## 搜索结果",
+        formatSearchResults(results),
+        "",
+        "## 抓取摘录",
+        fetched.map((f, i) => [`### ${i + 1}. ${f.title ?? f.url}`, `URL：${f.url ?? "未知"}`, f.error ? `抓取失败：${f.error}` : `状态：${f.status ?? "未知"}\n\n${f.excerpt ?? "无正文摘录"}`].join("\n")).join("\n\n") || "无可抓取来源。",
+      ].join("\n");
+      return { output, artifacts: [
+        { name: "collect.md", contentType: "text/markdown", content: output },
+        { name: "sources.json", contentType: "application/json", content: JSON.stringify({ objective, search: parsed, fetched }, null, 2) },
+      ] };
+    }
+    case "verify": {
+      const collect = previous.collect ?? "";
+      const sourceCount = (collect.match(/^### \d+\./gm) ?? []).length;
+      const output = [
+        "# 可信度判断和冲突说明",
+        "",
+        `目标：${objective}`,
+        `来源数量：${sourceCount}`,
+        "",
+        sourceCount >= 2 ? "结论：已具备至少两个候选来源，可进行交叉验证。" : "结论：来源不足，置信度较低，需要继续补充来源。",
+        "",
+        "## 验证规则",
+        "- 优先采用官方文档、项目仓库、权威技术博客。",
+        "- 对产品营销文案和个人博客保持谨慎。",
+        "- 时间敏感信息以查询时间为准。",
+        "- 若来源之间冲突，应在最终报告中显式标注。",
+        "",
+        "## 前序来源摘要",
+        collect.slice(0, 5000) || "无。",
+      ].join("\n");
+      return phaseOutput("research", "verify", output);
+    }
+    case "report": {
+      const verify = previous.verify ?? "";
+      const collect = previous.collect ?? "";
+      const output = [
+        "# 调研报告",
+        "",
+        `目标：${objective}`,
+        `生成时间：${new Date().toISOString()}`,
+        "",
+        "## 摘要结论",
+        "本报告基于 workflow 的 collect/verify 阶段自动检索与抓取结果生成。关键结论需要结合来源摘录阅读；若涉及最新行情或产品状态，应以后续实时查询为准。",
+        "",
+        "## 依据与交叉验证",
+        verify.slice(0, 4000) || "无验证摘要。",
+        "",
+        "## 来源摘录",
+        collect.slice(0, 6000) || "无来源摘录。",
+        "",
+        "## 不确定性",
+        "- 自动抓取可能遇到页面脚本、登录墙、地区限制或搜索摘要偏差。",
+        "- 需要高可靠结论时，应补充官方文档、原始仓库和人工复核。",
+      ].join("\n");
+      return { output, artifacts: [{ name: "report.md", contentType: "text/markdown", content: output }, { name: "final-report.md", contentType: "text/markdown", content: output }] };
+    }
+    default:
+      return phaseOutput("research", phaseName, `研究阶段 ${phaseName} 已完成。`);
+  }
+}
+
 function researchOutput(objective: string, phaseName: string, previous: Record<string, string>): string {
   switch (phaseName) {
     case "collect":
@@ -113,6 +215,25 @@ function genericOutput(objective: string, phaseName: string, previous: Record<st
     case "deliver": return `# 交付结果\n\n整理结果、风险和下一步。`;
     default: return `阶段 ${phaseName} 已完成。`;
   }
+}
+
+function parseJsonObject(raw: string): any {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return {};
+    try { return JSON.parse(match[0]); } catch { return {}; }
+  }
+}
+
+function formatSearchResults(results: any[]): string {
+  if (!results.length) return "无搜索结果。";
+  return results.map((r, i) => [
+    `${i + 1}. ${typeof r.title === "string" ? r.title : "Untitled"}`,
+    `   URL：${typeof r.url === "string" ? r.url : "未知"}`,
+    typeof r.snippet === "string" ? `   摘要：${r.snippet}` : undefined,
+  ].filter(Boolean).join("\n")).join("\n");
 }
 
 function statusIcon(status: string): string {

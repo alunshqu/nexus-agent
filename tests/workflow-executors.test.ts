@@ -22,7 +22,19 @@ describe("task-oriented workflow executor", () => {
     const result = await runWorkflow({
       store,
       workflow: buildAgentTeamWorkflow("research", "调研 agent workflow 趋势"),
-      executor: createTaskWorkflowExecutor(store),
+      executor: createTaskWorkflowExecutor(store, {
+        researchTools: {
+          search: async () => JSON.stringify({
+            provider: "fake",
+            query: "调研 agent workflow 趋势",
+            results: [
+              { title: "Anthropic Building Effective Agents", url: "https://example.com/anthropic", snippet: "workflows are predefined; agents dynamically direct tool use" },
+              { title: "LangGraph Overview", url: "https://example.com/langgraph", snippet: "agent workflows need state and durable execution" },
+            ],
+          }),
+          fetch: async ({ url }) => JSON.stringify({ url, status: 200, body: `Official content for ${url}: workflows orchestrate steps; agents decide actions dynamically.` }),
+        },
+      }),
     });
     finalizeWorkflowArtifacts(store, result);
 

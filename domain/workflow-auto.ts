@@ -3,6 +3,7 @@ import type { SessionState } from "./types.js";
 import { saveMessage, updateSessionStatus } from "../infra/session.js";
 import { createLogger } from "../infra/logger.js";
 import { selectWorkflowForTask, type WorkflowSelection } from "../workflows/selector.js";
+import { buildAgentTeamWorkflow } from "../workflows/agent-team.js";
 import { getWorkflowTemplate } from "../workflows/templates.js";
 import { createWorkflowStore } from "../workflows/store.js";
 import { runWorkflow } from "../workflows/runtime.js";
@@ -23,10 +24,10 @@ export function shouldAutoHandleWorkflow(userMessage: string, selection: Workflo
   if (selection.mode !== "workflow") return false;
   if (selection.confidence < Number(process.env.WORKFLOW_AUTO_CONFIDENCE ?? 0.72)) return false;
 
-  // Guardrail: built-in research/code/kb should not be intercepted here yet because the
-  // normal agent loop can use real tools; current workflow executors for those are task
-  // scaffolds. Auto-run only self-contained task templates to avoid degrading task quality.
-  return selection.templateId === "brainstorm-council" || selection.templateId === "general-task";
+  // Guardrail: only auto-run workflow paths that have real executors. Research is now
+  // backed by web_search/web_fetch. Code/kb are still kept out of main-loop auto mode
+  // until their executors perform real file/KB operations rather than scaffolding.
+  return selection.kind === "research" || selection.templateId === "brainstorm-council" || selection.templateId === "general-task";
 }
 
 export async function maybeHandleAutoWorkflow(
@@ -36,13 +37,17 @@ export async function maybeHandleAutoWorkflow(
 ): Promise<AutoWorkflowResult> {
   const selection = selectWorkflowForTask(userMessage);
   if (!shouldAutoHandleWorkflow(userMessage, selection)) return { handled: false, selection };
-  if (selection.mode !== "workflow" || !selection.templateId) return { handled: false, selection };
+  if (selection.mode !== "workflow") return { handled: false, selection };
 
-  const template = getWorkflowTemplate(selection.templateId);
-  if (!template) return { handled: false, selection };
+  const workflow = selection.templateId
+    ? getWorkflowTemplate(selection.templateId)?.build(userMessage)
+    : selection.kind
+    ? buildAgentTeamWorkflow(selection.kind, userMessage)
+    : undefined;
+  if (!workflow) return { handled: false, selection };
 
   const store = createWorkflowStore();
-  const run = store.createRun(template.build(userMessage));
+  const run = store.createRun(workflow);
   store.appendEvent(run.id, "run_created", { source: "agent_main_loop", selection, sessionId: state.id });
 
   updateSessionStatus(state.id, { running: true, currentPhase: "workflow", currentTool: undefined });
