@@ -39,23 +39,6 @@ export function compactNineSectionSummary(messages: Anthropic.MessageParam[]): s
   const evidence = facts.slice(-40).join("\n") || "- 暂无";
   return [
     "缓存已过期，本次为冷启动。以下是压缩后的早期上下文，避免在无缓存情况下重复发送完整历史。",
-    "## 会话目标",
-    evidence,
-    "## 已完成任务",
-    evidence,
-    "## 未完成任务",
-    "- 待从后续对话继续确认",
-    "## 关键决策和理由",
-    evidence,
-    "## 代码变更摘要",
-    evidence,
-    "## 发现的问题",
-    "- 待从后续对话继续确认",
-    "## 待验证的假设",
-    "- 待从后续对话继续确认",
-    "## 用户偏好",
-    "- 中文回复，代码和技术术语保持英文",
-    "## 上下文关键信息",
     evidence,
   ].join("\n");
 }

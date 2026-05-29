@@ -14,7 +14,7 @@ import { memoryTools, executeMemoryTool, retrieveForSystem, retrieveForMessages,
 import { shouldColdStartCompress, coldStartCompressMessages } from "./cold-start.js";
 import { stableTools, buildActiveTools } from "../tools/tool-assembly.js";
 import { toolCallSignature } from "../tools/tool-dedupe.js";
-import { selectPrinciplesForTask, renderActivePrincipleIdsForPrompt, createEmptyPrincipleEvidence, recordToolEvidence, recordToolResultEvidence, evaluatePrinciples, maybeIngestUserCorrection, type ActivePrinciple, type PrincipleEvidence } from "../principles/index.js";
+import { selectPrinciplesForTask, createEmptyPrincipleEvidence, recordToolEvidence, recordToolResultEvidence, evaluatePrinciples, maybeIngestUserCorrection, type ActivePrinciple, type PrincipleEvidence } from "../principles/index.js";
 
 const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS ?? 50);
 const TOOL_TIMEOUT_MS = Number(process.env.TOOL_TIMEOUT_MS ?? 5 * 60 * 1000); // 5 min default
@@ -80,12 +80,14 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       : "";
 
     phase = "select_principles";
-    // Principles are DISABLED by default: their per-turn selection varies with the user
-    // message, which mutated systemSuffix and was suspected of destabilizing the cache.
-    // Set PRINCIPLES_ENABLED=1 to restore. When off, activePrinciples stays empty and the
-    // whole principle pipeline (suffix injection, evidence, eval) becomes a no-op.
-    const principlesEnabled = process.env.PRINCIPLES_ENABLED === "1";
-    activePrinciples = principlesEnabled ? selectPrinciplesForTask(userMessage) : [];
+    // Active principles drive behavior via a STATIC block in the cached system prompt
+    // (prompt.ts:renderPrincipleRegistryForPrompt) — that is always on and cache-safe.
+    // The per-turn selection below is used ONLY for trace + post-hoc evaluation (which
+    // principles applied this turn, did the run satisfy them). It is never injected into
+    // the prompt, so it cannot destabilize the cache. Set PRINCIPLES_EVAL=0 to skip the
+    // observational selection/eval entirely.
+    const principlesEval = process.env.PRINCIPLES_EVAL !== "0";
+    activePrinciples = principlesEval ? selectPrinciplesForTask(userMessage) : [];
     principleEvidence = createEmptyPrincipleEvidence(userMessage);
 
     phase = "start_trace";
@@ -137,23 +139,25 @@ export async function runAgent(state: SessionState, opts: AgentOptions) {
       ? `\n<user_memory>\n${coreMemory}\n</user_memory>\n<context>\n${dynamicContext}\n</context>`
       : `\n<context>\n${dynamicContext}\n</context>`;
 
-    const principleRuntimeContext = renderActivePrincipleIdsForPrompt(activePrinciples);
-
     phase = "retrieve_context_memory";
     let contextMemory = "";
     if (userMessage) {
       contextMemory = await retrieveForMessages(userMessage);
     }
 
-    // All per-turn dynamic content (core memory, env/date, retrieved memory, runtime
-    // principles) goes into runSuffix → provider places it AFTER the cache prefix
-    // (Anthropic: 2nd system block; OpenAI: tail of input[]). It must never be injected
-    // into messages: loopMessages can share object refs with state.messages, so mutating
-    // a message here would leak dynamic content into persisted history and bust the
-    // prefix cache on every turn.
+    // Per-turn dynamic content (core memory, env/date, retrieved memory) goes into
+    // runSuffix → provider places it AFTER the cache prefix (Anthropic: tail of the last
+    // user message, after the rolling breakpoint; OpenAI: tail of input[]). It must never
+    // be injected into messages here: loopMessages can share object refs with
+    // state.messages, so mutating a message would leak dynamic content into persisted
+    // history and bust the prefix cache on every turn.
+    // NOTE: active principles are NOT injected here. They live as a STATIC block in the
+    // cached system prompt (prompt.ts:renderPrincipleRegistryForPrompt). Per-turn selection
+    // above is kept only for trace/evaluation, never for prompt injection — a varying
+    // principle list in the suffix would land outside the cache prefix but still churn it,
+    // and the static block already covers behavior (proven: suffix churn keeps read=0).
     const suffixParts = [memorySuffix];
     if (contextMemory) suffixParts.push(`\n<retrieved_memory>\n${contextMemory}\n</retrieved_memory>`);
-    if (principleRuntimeContext) suffixParts.push(`\n${principleRuntimeContext}`);
     const runSuffix = suffixParts.join("");
 
     for (iteration = 0; iteration < maxIter; iteration++) {

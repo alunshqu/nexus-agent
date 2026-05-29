@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import { applyCache } from "../domain/context.js";
+import { applyCache, applyLastMessageCache } from "../domain/context.js";
 import { createLogger, truncateString, truncateValue } from "./logger.js";
 import { inc } from "./metrics.js";
 
@@ -96,24 +96,27 @@ export function createAnthropicProvider(config: ProviderConfig): Provider {
 
       return withRetry(async () => {
         try {
+          // systemSuffix (per-turn dynamic content) must NOT go into a 2nd system block:
+          // the system section sits BEFORE messages in Anthropic's cache prefix, so a
+          // per-turn-varying block there kills the message cache read every turn (proven:
+          // cache_read stayed 0 across turns). Instead it rides at the tail of the last
+          // user message, AFTER the rolling breakpoint — see applyLastMessageCache.
           const systemBlocks: any[] = [
             { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
           ];
-          if (systemSuffix) {
-            systemBlocks.push({ type: "text", text: systemSuffix });
-          }
 
           const s = client.messages.stream({
           model,
           max_tokens: maxTokens,
-          // Top-level cache_control (prompt-caching-scope-2026-01-05): the API auto-places
-          // the breakpoint on the last cacheable block and rolls it forward as the
-          // conversation grows. A manual breakpoint on the moving messages[-2] position
-          // created unstable cache scopes — let the scope beta own the message tail.
-          cache_control: { type: "ephemeral" },
+          // Explicit rolling breakpoint on the LAST message. Probing this endpoint (Bedrock
+          // via code.casstime.ai) showed top-level cache_control is IGNORED here — only
+          // explicit breakpoints create cache. Without this, conversation history never
+          // enters the cache (cache_creation stays 0) and every turn re-bills the full
+          // history past the tools breakpoint. system + tools + last-message = 3 of the
+          // 4 allowed breakpoints.
           system: systemBlocks,
           tools: applyCache(tools),
-          messages,
+          messages: applyLastMessageCache(messages, systemSuffix),
           thinking: { type: "adaptive" },
           // user_id groups requests by end-user for Anthropic's abuse monitoring (best
           // practice). It does NOT affect prefix caching. Uses the no-PII session uuid.

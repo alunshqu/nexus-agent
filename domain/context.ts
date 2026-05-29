@@ -289,3 +289,35 @@ export function applyCache<T extends Anthropic.Tool>(tools: T[]): any[] {
     i === tools.length - 1 ? { ...t, cache_control: { type: "ephemeral" } } : t
   );
 }
+
+// Rolling cache breakpoint on the LAST message, with optional per-turn suffix kept OUTSIDE
+// the cached prefix. As the conversation grows the breakpoint moves forward with it, so each
+// turn the whole prior prefix (system + tools + history up to the previous last message) is a
+// cache read, and only the newest turn is written.
+//
+// The `suffix` carries per-turn dynamic content (retrieved memory, date, cwd). It MUST stay
+// out of the cache prefix or it busts the read every turn (proven: putting it in a 2nd system
+// block kept cache_read=0 across turns). So we append it as a trailing text block AFTER the
+// breakpoint: breakpoint sits on the last REAL block, suffix follows it and is never cached.
+// The model still sees the suffix as the final thing in the last user message.
+//
+// NOTE: at stream time the last message is always role "user" (initial user turn or
+// tool_result turn), so appending a text block is API-valid.
+export function applyLastMessageCache(messages: Anthropic.MessageParam[], suffix?: string): Anthropic.MessageParam[] {
+  if (messages.length === 0) return messages;
+  const idx = messages.length - 1;
+  const m = messages[idx];
+
+  const baseBlocks: any[] = typeof m.content === "string"
+    ? [{ type: "text", text: m.content }]
+    : Array.isArray(m.content) ? [...(m.content as any[])] : [];
+  if (baseBlocks.length === 0) return messages;
+
+  // Breakpoint on the last REAL block (the cached prefix ends here).
+  baseBlocks[baseBlocks.length - 1] = { ...baseBlocks[baseBlocks.length - 1], cache_control: { type: "ephemeral" } };
+  // Per-turn suffix goes AFTER the breakpoint → outside the cached prefix.
+  if (suffix) baseBlocks.push({ type: "text", text: suffix });
+
+  const patched: Anthropic.MessageParam = { ...m, content: baseBlocks as any };
+  return messages.map((msg, i) => (i === idx ? patched : msg));
+}

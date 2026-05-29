@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { truncateToolOutput, estimateTokens } from "../domain/context.js";
+import { truncateToolOutput, estimateTokens, applyLastMessageCache } from "../domain/context.js";
 import type Anthropic from "@anthropic-ai/sdk";
 
 // ── truncateToolOutput ────────────────────────────────────────────────────────
@@ -114,5 +114,65 @@ describe("estimateTokens", () => {
       ],
     };
     expect(estimateTokens(msg)).toBe(3);
+  });
+});
+
+// ── applyLastMessageCache ─────────────────────────────────────────────────────
+// The cache breakpoint must sit on the last REAL block, and the per-turn suffix must
+// land AFTER it so a varying suffix never invalidates the cached prefix.
+
+function lastBlocks(messages: Anthropic.MessageParam[]) {
+  return messages[messages.length - 1].content as any[];
+}
+
+describe("applyLastMessageCache", () => {
+  it("string content: breakpoint on the message text, no suffix", () => {
+    const out = applyLastMessageCache([{ role: "user", content: "hi" }]);
+    const blocks = lastBlocks(out);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: "text", text: "hi", cache_control: { type: "ephemeral" } });
+  });
+
+  it("appends suffix AFTER the breakpoint block (suffix stays outside cached prefix)", () => {
+    const out = applyLastMessageCache([{ role: "user", content: "hi" }], "DYNAMIC");
+    const blocks = lastBlocks(out);
+    expect(blocks).toHaveLength(2);
+    // breakpoint on the real block...
+    expect(blocks[0]).toMatchObject({ type: "text", text: "hi", cache_control: { type: "ephemeral" } });
+    // ...suffix follows it and is NOT cached.
+    expect(blocks[1]).toEqual({ type: "text", text: "DYNAMIC" });
+    expect(blocks[1].cache_control).toBeUndefined();
+  });
+
+  it("array content: breakpoint on the last real block, suffix appended after", () => {
+    const msgs: Anthropic.MessageParam[] = [
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "r" } as any] },
+    ];
+    const out = applyLastMessageCache(msgs, "MEM");
+    const blocks = lastBlocks(out);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toMatchObject({ type: "tool_result", tool_use_id: "t1", cache_control: { type: "ephemeral" } });
+    expect(blocks[1]).toEqual({ type: "text", text: "MEM" });
+  });
+
+  it("a varying suffix does not change the cached (breakpoint) block — prefix stays stable", () => {
+    const base: Anthropic.MessageParam[] = [{ role: "user", content: "stable question" }];
+    const a = lastBlocks(applyLastMessageCache(base, "memory turn 1"));
+    const b = lastBlocks(applyLastMessageCache(base, "memory turn 2 DIFFERENT"));
+    // The cached block (index 0) is byte-identical regardless of suffix.
+    expect(a[0]).toEqual(b[0]);
+    // Only the trailing, uncached suffix differs.
+    expect(a[1]).not.toEqual(b[1]);
+  });
+
+  it("does not mutate the input messages", () => {
+    const original: Anthropic.MessageParam = { role: "user", content: "hi" };
+    const input = [original];
+    applyLastMessageCache(input, "X");
+    expect(original).toEqual({ role: "user", content: "hi" });
+  });
+
+  it("empty messages pass through", () => {
+    expect(applyLastMessageCache([])).toEqual([]);
   });
 });

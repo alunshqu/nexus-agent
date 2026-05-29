@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { selectPrinciplesForTask, classifyTask } from "../principles/selector.js";
-import { renderActivePrinciplesForPrompt } from "../principles/prompt.js";
+import { renderPrincipleRegistryForPrompt } from "../principles/prompt.js";
+import { PRINCIPLE_CARDS } from "../principles/registry.js";
 import { createEmptyPrincipleEvidence, evaluatePrinciples, recordToolEvidence } from "../principles/evaluator.js";
 
 describe("principle runtime", () => {
@@ -19,19 +20,21 @@ describe("principle runtime", () => {
     expect(ids).toContain("P-FEEDBACK-LEARNING-LOOP");
   });
 
-  it("renders active principles as prompt obligations", () => {
-    const prompt = renderActivePrinciplesForPrompt(selectPrinciplesForTask("修一下这个 bug", undefined, 2));
-    expect(prompt).toContain("<active_principles>");
-    expect(prompt).toContain("Required actions");
-    expect(prompt).toContain("Evaluation must-have");
-  });
-
-  it("renders short active principle ids for dynamic runtime context", async () => {
-    const { renderActivePrincipleIdsForPrompt } = await import("../principles/prompt.js");
-    const prompt = renderActivePrincipleIdsForPrompt(selectPrinciplesForTask("修一下这个 bug", undefined, 2));
-    expect(prompt).toContain("<runtime_context>");
-    expect(prompt).toContain("P-PRINCIPLE-ACTIVE-RETRIEVAL");
-    expect(prompt).not.toContain("Required actions");
+  it("renders the full principle registry as a STATIC, deterministic block (cache-safe)", () => {
+    // The registry block lives in the cached system prompt. It must be byte-identical
+    // across calls (no per-turn/user input) so it never busts the prompt prefix cache.
+    const a = renderPrincipleRegistryForPrompt();
+    const b = renderPrincipleRegistryForPrompt();
+    expect(a).toBe(b);
+    expect(a).toContain("<work_principles>");
+    // Every principle id must be present so the model can self-select per task.
+    for (const card of PRINCIPLE_CARDS) {
+      expect(a).toContain(card.id);
+      expect(a).toContain(card.title);
+    }
+    // Must NOT contain any per-turn marker that would vary the prefix.
+    expect(a).not.toContain("for this turn");
+    expect(a).not.toContain("Matched triggers");
   });
 
   it("evaluates source-fix application with code change, test and validation evidence", () => {
