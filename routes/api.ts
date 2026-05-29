@@ -15,10 +15,11 @@ import { listCrons, getCron, addCron, updateCron, deleteCron } from "../infra/cr
 import { reloadHooks } from "../infra/hooks.js";
 import { getMetrics, gauge } from "../infra/metrics.js";
 import { summarizeCacheUsage } from "../infra/cache-usage.js";
-import { buildAgentTeamWorkflow, type AgentTeamKind } from "../workflows/agent-team.js";
+import { buildAgentTeamWorkflow, type BuiltInWorkflowKind } from "../workflows/agent-team.js";
 import { createWorkflowStore } from "../workflows/store.js";
 import { runWorkflow } from "../workflows/runtime.js";
 import { createBrainstormPhaseOutput, generateBrainstormReport } from "../workflows/brainstorm-report.js";
+import { getWorkflowTemplate, listWorkflowTemplates } from "../workflows/templates.js";
 
 const logger = createLogger("api");
 
@@ -432,12 +433,20 @@ export async function handleApiRequest(
     for await (const chunk of req) bodyStr += chunk;
     try {
       const body = JSON.parse(bodyStr || "{}");
-      const kind = body.kind as AgentTeamKind;
-      if (kind !== "research" && kind !== "code" && kind !== "kb" && kind !== "brainstorm") throw new Error("kind must be research, code, kb or brainstorm");
       if (!body.objective || typeof body.objective !== "string") throw new Error("objective required");
       const store = createWorkflowStore();
-      const run = store.createRun(buildAgentTeamWorkflow(kind, body.objective));
-      store.appendEvent(run.id, "run_created", { source: "api" });
+      let run;
+      if (body.templateId) {
+        const template = getWorkflowTemplate(String(body.templateId));
+        if (!template) throw new Error(`template not found: ${body.templateId}`);
+        run = store.createRun(template.build(body.objective));
+        store.appendEvent(run.id, "run_created", { source: "api", templateId: body.templateId });
+      } else {
+        const kind = body.kind as BuiltInWorkflowKind;
+        if (kind !== "research" && kind !== "code" && kind !== "kb") throw new Error("kind must be research, code or kb; use templateId for task templates");
+        run = store.createRun(buildAgentTeamWorkflow(kind, body.objective));
+        store.appendEvent(run.id, "run_created", { source: "api", kind });
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, run }));
     } catch (e) {
@@ -458,7 +467,7 @@ export async function handleApiRequest(
         store,
         runId: run.id,
         executor: async ({ run, phase, previousOutputs }) => {
-          const output = run.workflow.kind === "brainstorm"
+          const output = run.workflow.templateId === "brainstorm-council"
             ? createBrainstormPhaseOutput(run.workflow, phase.name, previousOutputs)
             : `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`;
           return {
@@ -467,7 +476,7 @@ export async function handleApiRequest(
           };
         },
       });
-      const report = result.workflow.kind === "brainstorm" ? generateBrainstormReport(result) : undefined;
+      const report = result.workflow.templateId === "brainstorm-council" ? generateBrainstormReport(result) : undefined;
       if (report) store.saveArtifact(result.id, "roadmap", "final-report.md", "text/markdown", report.markdown);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, run: result, report }));

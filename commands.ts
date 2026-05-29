@@ -6,10 +6,11 @@ import { getTraces } from "./infra/trace.js";
 import { rewriteSessionMessages } from "./infra/session.js";
 import { agentTemplates } from "./agents/index.js";
 import { listCrons, addCron, deleteCron, updateCron } from "./infra/cron.js";
-import { buildAgentTeamWorkflow, type AgentTeamKind } from "./workflows/agent-team.js";
+import { buildAgentTeamWorkflow, type BuiltInWorkflowKind } from "./workflows/agent-team.js";
 import { createWorkflowStore } from "./workflows/store.js";
 import { runWorkflow } from "./workflows/runtime.js";
 import { createBrainstormPhaseOutput, generateBrainstormReport } from "./workflows/brainstorm-report.js";
+import { getWorkflowTemplate, listWorkflowTemplates } from "./workflows/templates.js";
 
 type CommandHandler = (args: string, state: SessionState, opts: Omit<AgentOptions, "onEvent">) => Promise<string> | string;
 
@@ -232,7 +233,7 @@ System Prompt：（子 agent 的角色和规则）
   },
 
   workflow: {
-    description: "管理生产级 workflow（/workflow list | start <research|code|kb|brainstorm> <目标> | show <id> | run <id>）",
+    description: "管理 workflow（/workflow list | start <research|code|kb> <目标> | template <模板ID> <目标> | templates | show <id> | run <id>）",
     handler: async (args) => {
       const [sub, ...rest] = args.trim().split(/\s+/);
       const store = createWorkflowStore();
@@ -242,17 +243,39 @@ System Prompt：（子 agent 的角色和规则）
         if (runs.length === 0) return "暂无 workflow run。";
         return runs.map(r => {
           const current = r.phases.find(p => p.status === "running") ?? r.phases.find(p => p.status === "pending");
-          return `${statusIcon(r.status)} [${r.id.slice(0, 8)}] ${r.workflow.kind} ${r.status}\n   目标: ${r.workflow.objective}\n   当前: ${current ? `${current.name}/${current.status}` : "—"}\n   更新: ${new Date(r.updatedAt).toLocaleString()}`;
+          const template = r.workflow.templateId ? ` template=${r.workflow.templateId}` : "";
+          return `${statusIcon(r.status)} [${r.id.slice(0, 8)}] ${r.workflow.kind}${template} ${r.status}\n   目标: ${r.workflow.objective}\n   当前: ${current ? `${current.name}/${current.status}` : "—"}\n   更新: ${new Date(r.updatedAt).toLocaleString()}`;
         }).join("\n\n");
       }
 
-      if (sub === "start") {
-        const kind = rest.shift() as AgentTeamKind | undefined;
+      if (sub === "templates") {
+        const templates = listWorkflowTemplates();
+        return [
+          "可用 workflow 任务模板：",
+          ...templates.map(t => `- ${t.id}：${t.name} — ${t.description}`),
+          "\n使用：/workflow template <模板ID> <目标>",
+        ].join("\n");
+      }
+
+      if (sub === "template") {
+        const templateId = rest.shift();
         const objective = rest.join(" ").trim();
-        if (kind !== "research" && kind !== "code" && kind !== "kb" && kind !== "brainstorm") return "用法：/workflow start <research|code|kb|brainstorm> <目标>";
+        if (!templateId) return "用法：/workflow template <模板ID> <目标>";
+        const template = getWorkflowTemplate(templateId);
+        if (!template) return `未找到模板：${templateId}\n可用模板：${listWorkflowTemplates().map(t => t.id).join(", ") || "无"}`;
+        if (!objective) return "请提供 workflow 目标。";
+        const run = store.createRun(template.build(objective));
+        store.appendEvent(run.id, "run_created", { source: "slash_command", templateId });
+        return `✅ Workflow 模板任务已创建：${run.id}\n模板：${template.id}\n目标：${objective}\n阶段：${run.phases.map(p => p.name).join(" → ")}\n\n执行：/workflow run ${run.id.slice(0, 8)}`;
+      }
+
+      if (sub === "start") {
+        const kind = rest.shift() as BuiltInWorkflowKind | undefined;
+        const objective = rest.join(" ").trim();
+        if (kind !== "research" && kind !== "code" && kind !== "kb") return "用法：/workflow start <research|code|kb> <目标>\n一次性任务模板请用：/workflow template <模板ID> <目标>";
         if (!objective) return "请提供 workflow 目标。";
         const run = store.createRun(buildAgentTeamWorkflow(kind, objective));
-        store.appendEvent(run.id, "run_created", { source: "slash_command" });
+        store.appendEvent(run.id, "run_created", { source: "slash_command", kind });
         return `✅ Workflow 已创建：${run.id}\n类型：${kind}\n目标：${objective}\n阶段：${run.phases.map(p => p.name).join(" → ")}\n\n执行：/workflow run ${run.id.slice(0, 8)}`;
       }
 
@@ -265,7 +288,7 @@ System Prompt：（子 agent 的角色和规则）
         const artifacts = store.listArtifacts(run.id);
         return [
           `Workflow: ${run.id}`,
-          `类型：${run.workflow.kind}`,
+          `类型：${run.workflow.kind}${run.workflow.templateId ? ` / 模板：${run.workflow.templateId}` : ""}`,
           `状态：${run.status}`,
           `目标：${run.workflow.objective}`,
           "阶段：",
@@ -285,7 +308,7 @@ System Prompt：（子 agent 的角色和规则）
           store,
           runId: run.id,
           executor: async ({ run, phase, previousOutputs }) => {
-            const output = run.workflow.kind === "brainstorm"
+            const output = run.workflow.templateId === "brainstorm-council"
               ? createBrainstormPhaseOutput(run.workflow, phase.name, previousOutputs)
               : `阶段 ${phase.name} 已由 workflow runtime 标记完成。实际业务执行器可在 runtime executor 中接入 agent/tool。`;
             return {
@@ -294,15 +317,15 @@ System Prompt：（子 agent 的角色和规则）
             };
           },
         });
-        if (result.workflow.kind === "brainstorm") {
+        if (result.workflow.templateId === "brainstorm-council") {
           const report = generateBrainstormReport(result);
           store.saveArtifact(result.id, "roadmap", "final-report.md", "text/markdown", report.markdown);
-          return `✅ Brainstorm Workflow 执行结束：${result.id}\n状态：${result.status}\n\n${report.markdown}`;
+          return `✅ Workflow 模板任务执行结束：${result.id}\n模板：${result.workflow.templateId}\n状态：${result.status}\n\n${report.markdown}`;
         }
         return `✅ Workflow 执行结束：${result.id}\n状态：${result.status}\n阶段：${result.phases.map(p => `${p.name}=${p.status}`).join(", ")}`;
       }
 
-      return "/workflow list — 列出 workflow\n/workflow start <research|code|kb|brainstorm> <目标> — 创建 workflow\n/workflow show <id> — 查看详情\n/workflow run <id> — 执行到结束";
+      return "/workflow list — 列出 workflow\n/workflow templates — 列出任务模板\n/workflow start <research|code|kb> <目标> — 创建内置 workflow\n/workflow template <模板ID> <目标> — 创建一次性模板任务\n/workflow show <id> — 查看详情\n/workflow run <id> — 执行到结束";
     },
   },
 };

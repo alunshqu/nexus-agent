@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import { buildAgentTeamWorkflow } from "../workflows/agent-team.js";
 import { buildWorkflowRun, advanceWorkflowRun } from "../workflows/runner.js";
 import { createBrainstormPhaseOutput, generateBrainstormReport } from "../workflows/brainstorm-report.js";
+import { getWorkflowTemplate } from "../workflows/templates.js";
 
 describe("brainstorm report", () => {
   it("generates deterministic phase outputs and final report", () => {
-    const workflow = buildAgentTeamWorkflow("brainstorm", "构建划时代产品");
+    const workflow = getWorkflowTemplate("brainstorm-council")!.build("构建划时代产品");
     let run = buildWorkflowRun(workflow);
     for (const phase of run.phases) {
       const output = createBrainstormPhaseOutput(workflow, phase.name, {});

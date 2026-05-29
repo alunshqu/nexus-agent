@@ -7,7 +7,7 @@ export type BrainstormReport = {
 };
 
 export function generateBrainstormReport(run: WorkflowRun): BrainstormReport {
-  if (run.workflow.kind !== "brainstorm") throw new Error("generateBrainstormReport requires a brainstorm workflow");
+  if (run.workflow.templateId !== "brainstorm-council") throw new Error("generateBrainstormReport requires brainstorm-council template workflow");
   const objective = run.workflow.objective;
   const outputs = Object.fromEntries(run.phases.map(p => [p.name, p.output ?? ""]));
   const title = `多角色脑暴最终报告：${objective}`;
@@ -50,7 +50,7 @@ export function generateBrainstormReport(run: WorkflowRun): BrainstormReport {
 }
 
 export function createBrainstormPhaseOutput(workflow: AgentTeamWorkflow, phaseName: string, previousOutputs: Record<string, string>): string {
-  if (workflow.kind !== "brainstorm") return `阶段 ${phaseName} 已完成。`;
+  if (workflow.templateId !== "brainstorm-council") return `阶段 ${phaseName} 已完成。`;
   const objective = workflow.objective;
   switch (phaseName) {
     case "observe": return fallbackObserve(objective);
@@ -134,7 +134,7 @@ function fallbackPrototype(): string {
     "",
     "MVP 必备功能：",
     "",
-    "1. `/workflow start brainstorm <主题>` 生成多角色脑暴。",
+    "1. `/workflow template brainstorm-council <主题>` 生成多角色脑暴。",
     "2. 每次脑暴都保存 run/events/artifacts。",
     "3. 输出最终 Markdown 报告。",
     "4. 用户可以把报告转成任务、定时复盘、记忆。",
@@ -145,7 +145,7 @@ function fallbackPrototype(): string {
 function fallbackRoadmap(): string {
   return [
     "### 30 天：可用原型",
-    "- 支持 brainstorm workflow 原生类型。",
+    "- 支持 brainstorm-council 任务模板。",
     "- 内置多角色 council。",
     "- 输出最终报告 artifact。",
     "- 支持命令/API 创建、运行、查看。",
