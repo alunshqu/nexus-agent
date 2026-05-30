@@ -309,3 +309,21 @@ async function getFirstTabId(): Promise<string> {
   if (!page) throw new Error("No open tabs found");
   return page.id;
 }
+
+// Programmatic helper for internal workflow fallback. Keeps the public browser_* tool API intact.
+export async function toolBrowserGetContent(input: Record<string, unknown>): Promise<string> {
+  const url = String(input.url ?? "");
+  if (!/^https?:\/\//i.test(url)) throw new Error(`Invalid browser URL: ${url}`);
+  const nav = await executeBrowserTool({} as any, "browser_new_tab", { url });
+  if (nav.is_error) throw new Error(nav.content);
+  let tabId: string | undefined;
+  try { tabId = JSON.parse(nav.content).id; } catch { tabId = undefined; }
+  const content = await executeBrowserTool({} as any, "browser_get_content", tabId ? { tab_id: tabId } : {});
+  if (content.is_error) throw new Error(content.content);
+  try {
+    const parsed = JSON.parse(content.content);
+    return JSON.stringify({ url: parsed.url ?? url, status: 200, title: parsed.title ?? "", body: parsed.text ?? "" }, null, 2);
+  } catch {
+    return JSON.stringify({ url, status: 200, title: "", body: content.content }, null, 2);
+  }
+}

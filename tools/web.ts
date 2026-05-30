@@ -22,7 +22,7 @@ export const webTools: Anthropic.Tool[] = [
   },
   {
     name: "web_search",
-    description: "Search the web. Uses Tavily if TAVILY_API_KEY is set, Brave Search if BRAVE_SEARCH_API_KEY is set, otherwise DuckDuckGo.",
+    description: "Search the web. Uses AnySearch if ANY_SEARCH_KEY or ANYSEARCH_API_KEY is set, then Tavily, Brave Search, otherwise DuckDuckGo.",
     input_schema: {
       type: "object",
       properties: {
@@ -57,6 +57,31 @@ export async function toolWebFetch(input: Record<string, unknown>) {
 export async function toolWebSearch(input: Record<string, unknown>) {
   const query = expectString(input.query, "query");
   const maxResults = clampNumber(input.max_results, 8, 1, 20);
+
+  const anySearchKey = process.env.ANY_SEARCH_KEY ?? process.env.ANYSEARCH_API_KEY;
+  if (anySearchKey) {
+    try {
+      const response = await fetchWithTimeout("https://api.anysearch.com/v1/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${anySearchKey}` },
+        body: JSON.stringify({ query, max_results: maxResults }),
+      }, WEB_SEARCH_TIMEOUT_MS, "web_search:anysearch");
+      const json = await response.json() as any;
+      const results = (json.results ?? []).map((r: any) => ({
+        title: r.title,
+        url: r.url,
+        snippet: String(r.description ?? r.content ?? "").slice(0, 500),
+        content: r.content ? String(r.content).slice(0, 2000) : undefined,
+        source: r.source,
+        score: r.score,
+        quality_score: r.quality_score,
+        published_at: r.published_at,
+      }));
+      return truncate(JSON.stringify({ provider: "anysearch", query, results, metadata: json.metadata }, null, 2));
+    } catch (error) {
+      // Keep web_search usable if AnySearch is temporarily unavailable or quota-limited.
+    }
+  }
 
   if (process.env.TAVILY_API_KEY) {
     const response = await fetchWithTimeout("https://api.tavily.com/search", {

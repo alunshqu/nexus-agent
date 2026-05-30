@@ -3,6 +3,7 @@ import type { WorkflowStore } from "./store.js";
 import type { WorkflowExecutor, WorkflowExecutorContext, WorkflowExecutorResult } from "./runtime.js";
 import { createBrainstormPhaseOutput, generateBrainstormReport } from "./brainstorm-report.js";
 import { toolWebFetch, toolWebSearch } from "../tools/web.js";
+import { toolBrowserGetContent } from "../tools/browser.js";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { existsSync, readFileSync } from "fs";
@@ -15,6 +16,7 @@ export type RegisteredWorkflowExecutor = WorkflowExecutor & { id?: string };
 type ResearchTools = {
   search: (input: Record<string, unknown>) => Promise<string>;
   fetch: (input: Record<string, unknown>) => Promise<string>;
+  browser?: (input: Record<string, unknown>) => Promise<string>;
 };
 
 type ResearchBudget = {
@@ -22,13 +24,15 @@ type ResearchBudget = {
   maxFetches: number;
   maxCharsPerPage: number;
   minUsableSources: number;
+  maxQueries: number;
 };
 
 const DEFAULT_RESEARCH_BUDGET: ResearchBudget = {
   maxSearchResults: Number(process.env.WORKFLOW_RESEARCH_MAX_RESULTS ?? 6),
-  maxFetches: Number(process.env.WORKFLOW_RESEARCH_MAX_FETCHES ?? 4),
+  maxFetches: Number(process.env.WORKFLOW_RESEARCH_MAX_FETCHES ?? 6),
   maxCharsPerPage: Number(process.env.WORKFLOW_RESEARCH_MAX_CHARS_PER_PAGE ?? 1200),
   minUsableSources: Number(process.env.WORKFLOW_RESEARCH_MIN_USABLE_SOURCES ?? 2),
+  maxQueries: Number(process.env.WORKFLOW_RESEARCH_MAX_QUERIES ?? 8),
 };
 
 type TaskWorkflowExecutorOptions = {
@@ -42,7 +46,7 @@ type CodeTools = {
 };
 
 export function createTaskWorkflowExecutor(store: WorkflowStore, options: TaskWorkflowExecutorOptions = {}): RegisteredWorkflowExecutor {
-  const researchTools = options.researchTools ?? { search: toolWebSearch, fetch: toolWebFetch };
+  const researchTools = options.researchTools ?? { search: toolWebSearch, fetch: toolWebFetch, browser: toolBrowserGetContent };
   const researchBudget = { ...DEFAULT_RESEARCH_BUDGET, ...(options.researchBudget ?? {}) };
   const codeTools = options.codeTools ?? { exec: runCommand };
   return async function taskWorkflowExecutor(context: WorkflowExecutorContext): Promise<WorkflowExecutorResult> {
@@ -116,9 +120,16 @@ async function executeResearchPhase(objective: string, phaseName: string, previo
   switch (phaseName) {
     case "collect": {
       const cleanedObjective = cleanResearchObjective(objective);
-      const searchRaw = await tools.search({ query: cleanedObjective, max_results: budget.maxSearchResults });
-      const parsed = parseJsonObject(searchRaw);
-      const results = Array.isArray(parsed.results) ? filterSearchResults(parsed.results).slice(0, budget.maxFetches) : [];
+      const queries = buildResearchQueries(cleanedObjective).slice(0, budget.maxQueries);
+      const searchPayloads: any[] = [];
+      const mergedResults: any[] = [];
+      for (const query of queries) {
+        const searchRaw = await tools.search({ query, max_results: budget.maxSearchResults });
+        const parsed = parseJsonObject(searchRaw);
+        searchPayloads.push({ query, parsed });
+        if (Array.isArray(parsed.results)) mergedResults.push(...parsed.results);
+      }
+      const results = filterSearchResults(mergedResults).slice(0, budget.maxFetches);
       const fetched: Array<{ title?: string; url?: string; status?: number; excerpt?: string; error?: string }> = [];
       for (const result of results) {
         const url = typeof result?.url === "string" ? result.url : undefined;
@@ -126,35 +137,68 @@ async function executeResearchPhase(objective: string, phaseName: string, previo
         try {
           const fetchRaw = await tools.fetch({ url });
           const fetchedJson = parseJsonObject(fetchRaw);
+          let excerpt = typeof fetchedJson.body === "string" ? fetchedJson.body.slice(0, budget.maxCharsPerPage) : undefined;
+          let status = typeof fetchedJson.status === "number" ? fetchedJson.status : undefined;
+          if ((status && status >= 400) || (excerpt?.trim().length ?? 0) < 200) {
+            const browserRaw = tools.browser ? await tools.browser({ url }) : undefined;
+            if (browserRaw) {
+              const browserJson = parseJsonObject(browserRaw);
+              const browserBody = typeof browserJson.body === "string" ? browserJson.body : "";
+              if (browserBody.trim().length > (excerpt?.trim().length ?? 0)) {
+                excerpt = browserBody.slice(0, budget.maxCharsPerPage);
+                status = typeof browserJson.status === "number" ? browserJson.status : 200;
+              }
+            }
+          }
           fetched.push({
             title: typeof result.title === "string" ? result.title : undefined,
             url,
-            status: typeof fetchedJson.status === "number" ? fetchedJson.status : undefined,
-            excerpt: typeof fetchedJson.body === "string" ? fetchedJson.body.slice(0, budget.maxCharsPerPage) : undefined,
+            status,
+            excerpt,
           });
         } catch (error) {
+          if (tools.browser) {
+            try {
+              const browserRaw = await tools.browser({ url });
+              const browserJson = parseJsonObject(browserRaw);
+              fetched.push({
+                title: typeof result.title === "string" ? result.title : undefined,
+                url,
+                status: typeof browserJson.status === "number" ? browserJson.status : 200,
+                excerpt: typeof browserJson.body === "string" ? browserJson.body.slice(0, budget.maxCharsPerPage) : undefined,
+              });
+              continue;
+            } catch {
+              // fall through to regular error record
+            }
+          }
           fetched.push({ title: result.title, url, error: error instanceof Error ? error.message : String(error) });
         }
       }
-      const usableSources = fetched.filter(f => !f.error && (f.status === 200 || f.status === undefined) && (f.excerpt?.trim().length ?? 0) >= 200);
+      const usableSources = fetched.filter(f => isUsableFetchedSource(f));
+      const weakSources = buildWeakSourcesFromSearchResults(results, fetched, budget).slice(0, Math.max(0, budget.minUsableSources - usableSources.length));
+      const evidenceSources = [...usableSources, ...weakSources];
       const output = [
         "# 候选来源与关键事实",
         "",
         `目标：${cleanedObjective}`,
         `原始输入：${objective.slice(0, 500)}`,
         `查询时间：${new Date().toISOString()}`,
-        `预算：maxResults=${budget.maxSearchResults}, maxFetches=${budget.maxFetches}, maxCharsPerPage=${budget.maxCharsPerPage}`,
-        `可用来源：${usableSources.length}/${fetched.length}`,
+        `预算：maxQueries=${budget.maxQueries}, maxResults=${budget.maxSearchResults}, maxFetches=${budget.maxFetches}, maxCharsPerPage=${budget.maxCharsPerPage}`,
+        `证据来源：强=${usableSources.length}，弱=${weakSources.length}，总=${evidenceSources.length}`,
+        "",
+        "## 查询策略",
+        queries.map((q, i) => `${i + 1}. ${q}`).join("\n"),
         "",
         "## 搜索结果",
         formatSearchResults(results),
         "",
         "## 抓取摘录",
-        fetched.map((f, i) => [`### ${i + 1}. ${f.title ?? f.url}`, `URL：${f.url ?? "未知"}`, f.error ? `抓取失败：${f.error}` : `状态：${f.status ?? "未知"}\n\n${f.excerpt ?? "无正文摘录"}`].join("\n")).join("\n\n") || "无可抓取来源。",
+        evidenceSources.map((f, i) => [`### ${i + 1}. ${f.title ?? f.url}`, `URL：${f.url ?? "未知"}`, f.error ? `抓取失败：${f.error}` : `状态：${f.status ?? "未知"}\n\n${f.excerpt ?? "无正文摘录"}`].join("\n")).join("\n\n") || "无可抓取来源。",
       ].join("\n");
-      return { output, quality: { passed: usableSources.length >= budget.minUsableSources, reason: usableSources.length >= budget.minUsableSources ? undefined : `usable sources ${usableSources.length} below minimum ${budget.minUsableSources}`, score: usableSources.length }, artifacts: [
+      return { output, quality: { passed: evidenceSources.length >= budget.minUsableSources, reason: evidenceSources.length >= budget.minUsableSources ? undefined : `evidence sources ${evidenceSources.length} below minimum ${budget.minUsableSources}`, score: evidenceSources.length }, artifacts: [
         { name: "collect.md", contentType: "text/markdown", content: output },
-        { name: "sources.json", contentType: "application/json", content: JSON.stringify({ objective, search: parsed, fetched }, null, 2) },
+        { name: "sources.json", contentType: "application/json", content: JSON.stringify({ objective, queries, searchPayloads, fetched, weakSources }, null, 2) },
       ] };
     }
     case "verify": {
@@ -374,6 +418,7 @@ type ResearchSignal = {
   sourceCount: number;
   sourceViews: string[];
   confidence: "高" | "中" | "低";
+  priceContext?: string;
 };
 
 function buildResearchFinalReport(objective: string, collect: string): string {
@@ -390,6 +435,7 @@ function buildResearchFinalReport(objective: string, collect: string): string {
     "## 结论先行",
     conclusion,
     `置信度：${signal.confidence}`,
+    signal.priceContext ? `价格/区间线索：${signal.priceContext}` : "价格/区间线索：当前来源不足以给出可靠具体价位，不强行预测。",
     "",
     "## 6-9 月节奏判断",
     `- 6月：更关注美联储政策预期、美元和实际利率变化；若降息预期升温，黄金偏强。`,
@@ -426,13 +472,30 @@ function inferResearchSignal(objective: string, collect: string): ResearchSignal
   if (/回调|下跌|承压|跌至|bearish|pressure/i.test(text)) risks.push("高位回调风险");
   const sourceCount = (collect.match(/^### \d+\./gm) ?? []).length;
   const sourceViews = extractSourceViews(collect).slice(0, 5);
+  const priceContext = extractPriceContext(text);
   let trend: ResearchSignal["trend"] = "不确定";
   if (drivers.length >= 2 && risks.length >= 1) trend = "高位震荡";
   else if (drivers.length >= 2) trend = "偏强";
   else if (risks.length >= 2) trend = "偏弱";
   else if (sourceCount >= 2) trend = "高位震荡";
   const confidence: ResearchSignal["confidence"] = sourceCount >= 4 && drivers.length >= 2 ? "中" : sourceCount >= 2 ? "低" : "低";
-  return { trend, drivers, risks, sourceCount, sourceViews, confidence };
+  return { trend, drivers, risks, sourceCount, sourceViews, confidence, priceContext };
+}
+
+function extractPriceContext(text: string): string | undefined {
+  const matches = [...text.matchAll(/(?:(?:\$|美元|美金|每盎司)\s*)(\d{3,5})(?:\s*(?:-|至|到|~)\s*(\d{3,5}))?|(?:黄金|金价|现货黄金|gold)[^\n。；;]{0,40}?(\d{3,5})(?:\s*(?:-|至|到|~)\s*(\d{3,5}))?\s*(?:美元|美金|\/oz|\/盎司|每盎司)/gi)]
+    .map(m => {
+      const a = m[1] ?? m[3];
+      const b = m[2] ?? m[4];
+      return b ? `${a}-${b}` : a;
+    })
+    .filter(v => {
+      const n = Number(v.split("-")[0]);
+      // Avoid matching years and small unrelated numbers. Gold USD/oz context is normally above 1500 here.
+      return n >= 1500 && n <= 10000 && n !== 2025 && n !== 2026 && n !== 2027;
+    });
+  const unique = [...new Set(matches)].slice(0, 3);
+  return unique.length ? `来源中出现的关键价位/区间：${unique.join("、")}；仅作情景参考，不作为确定预测。` : undefined;
 }
 
 function extractSourceViews(collect: string): string[] {
@@ -594,6 +657,40 @@ function cleanResearchObjective(input: string): string {
   return normalized.slice(0, 240) || input.slice(0, 240);
 }
 
+function isUsableFetchedSource(source: { status?: number; excerpt?: string; error?: string }): boolean {
+  return !source.error && (source.status === 200 || source.status === undefined) && (source.excerpt?.trim().length ?? 0) >= 200;
+}
+
+function buildWeakSourcesFromSearchResults(
+  results: any[],
+  fetched: Array<{ url?: string; status?: number; excerpt?: string; error?: string }>,
+  budget: ResearchBudget
+): Array<{ title?: string; url?: string; status?: number; excerpt?: string; error?: string }> {
+  const strongUrls = new Set(fetched.filter(isUsableFetchedSource).map(f => f.url).filter(Boolean));
+  return results
+    .filter(r => typeof r?.url === "string" && !strongUrls.has(r.url))
+    .filter(r => typeof r?.snippet === "string" && r.snippet.trim().length >= 80)
+    .slice(0, budget.minUsableSources)
+    .map(r => ({
+      title: typeof r.title === "string" ? r.title : undefined,
+      url: r.url,
+      status: 0,
+      excerpt: `[弱证据：搜索摘要，正文未抓取或正文质量不足] ${r.snippet.slice(0, budget.maxCharsPerPage)}`,
+    }));
+}
+
+function buildResearchQueries(objective: string): string[] {
+  const base = objective.trim();
+  const queries = [base];
+  if (/黄金|gold/i.test(base)) {
+    queries.push("gold price outlook June September 2026 Fed rate cuts dollar real yields");
+    queries.push("World Gold Council gold outlook 2026 central bank buying real yields");
+    queries.push("Reuters Kitco gold price forecast Q3 2026 Fed dollar");
+  }
+  queries.push(`${base} forecast outlook analysis`);
+  return [...new Set(queries)].filter(Boolean);
+}
+
 function filterSearchResults(results: any[]): any[] {
   const seen = new Set<string>();
   return results.filter(r => {
@@ -601,6 +698,9 @@ function filterSearchResults(results: any[]): any[] {
     if (!url || seen.has(url)) return false;
     seen.add(url);
     if (/zhihu\.com|mitrade\.com|pinterest|facebook|x\.com|twitter\.com/i.test(url)) return false;
+    if (/\.pdf(?:$|\?)/i.test(url)) return false;
+    const title = `${r?.title ?? ""} ${r?.snippet ?? ""}`;
+    if (/人民网|国际观察|过山车|何去何从/.test(title) && !/预测|展望|forecast|outlook|World Gold Council|Reuters|Kitco|LBMA|CME/i.test(title)) return false;
     return true;
   });
 }
