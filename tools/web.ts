@@ -1,5 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { expectString, clampNumber, truncate, isPlainObject, decodeDuckDuckGoUrl, stripHtml, decodeHtml } from "./helpers.js";
+import { createLogger } from "../infra/logger.js";
+
+const logger = createLogger("web_tool");
 
 const WEB_FETCH_TIMEOUT_MS = Number(process.env.WEB_FETCH_TIMEOUT_MS ?? 30000);
 const WEB_SEARCH_TIMEOUT_MS = Number(process.env.WEB_SEARCH_TIMEOUT_MS ?? 30000);
@@ -67,19 +70,22 @@ export async function toolWebSearch(input: Record<string, unknown>) {
         body: JSON.stringify({ query, max_results: maxResults }),
       }, WEB_SEARCH_TIMEOUT_MS, "web_search:anysearch");
       const json = await response.json() as any;
-      const results = (json.results ?? []).map((r: any) => ({
+      if (!response.ok || json.code !== 0) {
+        throw new Error(`anysearch ${response.status}: ${json.message ?? "unknown error"}`);
+      }
+      // AnySearch wraps the payload: { code, message, data: { results, metadata } }.
+      const results = (json.data?.results ?? []).map((r: any) => ({
         title: r.title,
         url: r.url,
-        snippet: String(r.description ?? r.content ?? "").slice(0, 500),
+        snippet: String(r.description || r.content || "").slice(0, 500),
         content: r.content ? String(r.content).slice(0, 2000) : undefined,
-        source: r.source,
         score: r.score,
         quality_score: r.quality_score,
-        published_at: r.published_at,
       }));
-      return truncate(JSON.stringify({ provider: "anysearch", query, results, metadata: json.metadata }, null, 2));
+      return truncate(JSON.stringify({ provider: "anysearch", query, results, metadata: json.data?.metadata }, null, 2));
     } catch (error) {
-      // Keep web_search usable if AnySearch is temporarily unavailable or quota-limited.
+      // Fall through to the next provider, but surface why AnySearch failed.
+      logger.warn("anysearch_failed", { query, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
