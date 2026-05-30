@@ -14,9 +14,14 @@ import { createLogger } from "./infra/logger.js";
 import { loadHooks } from "./infra/hooks.js";
 import { startScheduler } from "./infra/cron.js";
 import { formatTokenUsage } from "./infra/usage.js";
+import { ensureUsableDnsServers } from "./infra/dns-fix.js";
 import type { CronJob } from "./infra/cron.js";
 
 const logger = createLogger("server");
+
+// Must run before any network call (MCP/provider/wecom): if the Node runtime came up with
+// a broken loopback DNS server, repoint it at the real resolvers from /etc/resolv.conf.
+ensureUsableDnsServers();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 8080);
